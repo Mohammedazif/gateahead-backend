@@ -1,6 +1,6 @@
 # SmartRail API
 
-India-wide railway level-crossing alerts. This repository is the Python service: FastAPI and the Telegram bot. The website lives in a separate repository.
+India-wide railway level-crossing alerts. This repository is the Python service: FastAPI and the Telegram bot. The website and the phone app are separate repositories.
 
 Crossings and trains are fetched from the user's location. There is no hardcoded station, train, or gate catalog.
 
