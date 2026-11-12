@@ -1,4 +1,4 @@
-# SmartRail India — implementation plan
+# GateAhead — implementation plan
 
 Branch **`v1`** is the working Telegram bot for the Mangalore–Kannur corridor. It used hardcoded `stations.json`, `trains.json`, and `gates.json`. That does not scale.
 
@@ -40,10 +40,10 @@ A city we have never visited must work if OSM has a crossing and a station `ref`
 Telegram / Web / Mobile
           │
           ▼
-    FastAPI  (smartrail.api)
+    FastAPI  (gateahead.api)
           │
           ▼
-    SmartRail service
+    GateAhead service
       ├─ OSM Overpass     crossings, stations, rail ways
       ├─ verify           pin vs track / duplicate / road
       ├─ erail            train numbers for this stretch
@@ -108,7 +108,7 @@ This is **crowdsourcing**, not ML training.
 
 ## Persistence
 
-**Now (main):** SQLite (`data/smartrail.db`)
+**Now (main):** SQLite (`data/gateahead.db`)
 
 - `users` — location, subscription, crossing ids
 - `crossings` — user candidates (`pending` / `public`)

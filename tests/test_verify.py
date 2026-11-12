@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from smartrail.models import Crossing
-from smartrail.verify import check_pin
+from gateahead.models import Crossing
+from gateahead.verify import check_pin
 
 
 def test_reject_when_far_from_rail():

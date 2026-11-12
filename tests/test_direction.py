@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from smartrail.models import Crossing, TrainPosition
-from smartrail.predict import crossing_is_ahead
+from gateahead.models import Crossing, TrainPosition
+from gateahead.predict import crossing_is_ahead
 
 
 def _pos(**kwargs) -> TrainPosition:

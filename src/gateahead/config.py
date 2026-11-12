@@ -9,8 +9,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def database_path(data_dir: Path) -> Path:
+    path = data_dir / "gateahead.db"
+    legacy = data_dir / "smartrail.db"
+    if not path.exists() and legacy.exists():
+        legacy.rename(path)
+        for suffix in ("-wal", "-shm"):
+            old = legacy.with_name(legacy.name + suffix)
+            if old.exists():
+                old.rename(path.with_name(path.name + suffix))
+    return path
+
+
 def find_data_dir() -> Path:
-    env = os.getenv("SMARTRAIL_DATA")
+    env = os.getenv("GATEAHEAD_DATA")
     if env:
         return Path(env)
     here = Path(__file__).resolve()
@@ -42,7 +54,7 @@ class Settings:
 
     @property
     def db_path(self) -> Path:
-        return self.data_dir / "smartrail.db"
+        return database_path(self.data_dir)
 
 
 def load_settings() -> Settings:

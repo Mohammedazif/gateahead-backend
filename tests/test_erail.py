@@ -1,7 +1,7 @@
 import asyncio
 
-from smartrail import erail
-from smartrail.erail import parse_train_numbers, parse_train_rows, trains_between
+from gateahead import erail
+from gateahead.erail import parse_train_numbers, parse_train_rows, trains_between
 
 
 def setup_function() -> None:

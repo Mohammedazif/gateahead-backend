@@ -1,8 +1,8 @@
 import asyncio
 from datetime import datetime, timedelta
 
-from smartrail.models import Station, TrainPosition
-from smartrail.service import (
+from gateahead.models import Station, TrainPosition
+from gateahead.service import (
     _clock_rank,
     _cluster_is_shown,
     _discover_trains_from,
@@ -43,7 +43,7 @@ def test_empty_halt_pair_still_finds_the_mail_on_the_junction_pair():
         Station("PTJ", "Podanur Junction", 10.99, 76.97),
         Station("ED", "Erode Junction", 11.34, 77.73),
     ]
-    import smartrail.service as service
+    import gateahead.service as service
 
     original = service.train_rows
     service.train_rows = fake

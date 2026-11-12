@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from smartrail.config import Settings
-from smartrail.geo import along_route, km
-from smartrail.models import Crossing, TrainPosition
+from gateahead.config import Settings
+from gateahead.geo import along_route, km
+from gateahead.models import Crossing, TrainPosition
 
 _ON_RAIL_KM = 0.2
 _TRAIN_ON_RAIL_KM = 8.0

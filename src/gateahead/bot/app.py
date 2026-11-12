@@ -7,13 +7,13 @@ import aiohttp
 from telegram.error import NetworkError, TimedOut
 from telegram.ext import Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
-from smartrail.alerts import poll_alerts
-from smartrail.bot import handlers
-from smartrail.bot.formatters import friendly_error
-from smartrail.config import load_settings
-from smartrail.halts import ensure_catalog
-from smartrail.service import SmartRail
-from smartrail.store import Store
+from gateahead.alerts import poll_alerts
+from gateahead.bot import handlers
+from gateahead.bot.formatters import friendly_error
+from gateahead.config import load_settings
+from gateahead.halts import ensure_catalog
+from gateahead.service import GateAhead
+from gateahead.store import Store
 
 
 def build_application() -> Application:
@@ -28,10 +28,10 @@ def build_application() -> Application:
 
     async def post_init(app: Application) -> None:
         session = aiohttp.ClientSession(
-            headers={"User-Agent": "SmartRail/0.3 (https://github.com/Mohammedazif/smartrail-tele)"}
+            headers={"User-Agent": "GateAhead/0.3 (https://github.com/Mohammedazif/gateahead-tele)"}
         )
         app.bot_data["http"] = session
-        app.bot_data["service"] = SmartRail(settings, store, session)
+        app.bot_data["service"] = GateAhead(settings, store, session)
         await ensure_catalog(session, store)
         app.job_queue.run_repeating(
             poll_alerts,
@@ -97,5 +97,5 @@ def main() -> None:
     except SystemExit as exc:
         print(exc, file=sys.stderr)
         raise
-    print("SmartRail (main) running. Ctrl+C to stop.")
+    print("GateAhead (main) running. Ctrl+C to stop.")
     application.run_polling()

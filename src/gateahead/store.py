@@ -6,8 +6,8 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from smartrail.geo import km
-from smartrail.models import Crossing, Halt, RouteStop, SavedRoute, User
+from gateahead.geo import km
+from gateahead.models import Crossing, Halt, RouteStop, SavedRoute, User
 
 
 class Store:
@@ -40,6 +40,7 @@ class Store:
               osm_id TEXT NOT NULL DEFAULT '',
               added_by INTEGER
             );
+            CREATE INDEX IF NOT EXISTS crossings_lat ON crossings(lat);
             CREATE TABLE IF NOT EXISTS alerts (
               key TEXT PRIMARY KEY,
               sent_at TEXT NOT NULL
@@ -165,6 +166,79 @@ class Store:
         ).fetchall()
         return [_crossing(row) for row in rows]
 
+    def crossings_near(self, lat: float, lon: float, radius_m: float) -> list[Crossing]:
+        radius_km = max(0.0, radius_m) / 1000.0
+        dlat = radius_km / 111.0
+        dlon = radius_km / (111.0 * max(0.2, math.cos(math.radians(lat))))
+        rows = self._conn.execute(
+            """
+            SELECT * FROM crossings
+            WHERE status IN ('public', 'pending')
+              AND lat BETWEEN ? AND ?
+              AND lon BETWEEN ? AND ?
+            """,
+            (lat - dlat, lat + dlat, lon - dlon, lon + dlon),
+        ).fetchall()
+        origin = (lat, lon)
+        found = [
+            _crossing(row)
+            for row in rows
+            if km(origin, (row["lat"], row["lon"])) * 1000 <= radius_m
+        ]
+        found.sort(key=lambda crossing: km(origin, crossing.coords))
+        return found
+
+    def insert_crossings(self, crossings: list[Crossing]) -> int:
+        rows = [
+            (
+                crossing.id,
+                crossing.name,
+                crossing.lat,
+                crossing.lon,
+                crossing.source,
+                crossing.status,
+                crossing.nearest_station,
+                crossing.osm_id,
+            )
+            for crossing in crossings
+            if crossing.id
+        ]
+        if not rows:
+            return 0
+        before = self._conn.execute("SELECT COUNT(*) AS n FROM crossings").fetchone()["n"]
+        self._conn.executemany(
+            """
+            INSERT INTO crossings (id, name, lat, lon, source, status, nearest_station, osm_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO NOTHING
+            """,
+            rows,
+        )
+        self._conn.commit()
+        after = self._conn.execute("SELECT COUNT(*) AS n FROM crossings").fetchone()["n"]
+        return int(after) - int(before)
+
+    def insert_missing_halts(self, halts: list[Halt]) -> int:
+        rows = [
+            (halt.code, halt.name, halt.lat, halt.lon, halt.kind, halt.zone, halt.source)
+            for halt in halts
+            if halt.code
+        ]
+        if not rows:
+            return 0
+        before = self.halt_count()
+        self._conn.executemany(
+            """
+            INSERT INTO halts (code, name, lat, lon, kind, zone, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(code) DO NOTHING
+            """,
+            rows,
+        )
+        added = self.halt_count() - before
+        self._conn.commit()
+        return added
+
     def should_alert(self, user_id: int, cluster_id: str, train_number: str, cooldown_min: int) -> bool:
         key = f"{user_id}:{cluster_id}:{train_number}"
         row = self._conn.execute("SELECT sent_at FROM alerts WHERE key = ?", (key,)).fetchone()
@@ -209,7 +283,7 @@ class Store:
         self._conn.commit()
 
     def remember_stop_halts(self, stops: list[RouteStop]) -> int:
-        from smartrail.halts import clean_code, halt_kind
+        from gateahead.halts import clean_code, halt_kind
 
         rows = []
         seen: set[str] = set()

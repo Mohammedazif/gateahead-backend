@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from smartrail.config import Settings
-from smartrail.geo import along_route, stitch_rail
-from smartrail.models import Crossing, TrainPosition
-from smartrail.predict import route_eta
-from smartrail.timetable import BEND_HALF_KM, list_status, timetable_call, merge_call
+from gateahead.config import Settings
+from gateahead.geo import along_route, stitch_rail
+from gateahead.models import Crossing, TrainPosition
+from gateahead.predict import route_eta
+from gateahead.timetable import BEND_HALF_KM, list_status, timetable_call, merge_call
 
 _CHAIN_KM = 12.0
 _DRAW_KM = 1.5

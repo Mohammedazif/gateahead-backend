@@ -7,7 +7,7 @@ import aiohttp
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 _HEADERS = {
-    "User-Agent": "SmartRail/0.3 (https://github.com/Mohammedazif/smartrail-tele)",
+    "User-Agent": "GateAhead/0.3 (https://github.com/Mohammedazif/gateahead-tele)",
     "Accept": "application/json",
 }
 _LOCAL = ("quarter", "neighbourhood", "suburb", "hamlet", "village", "town")

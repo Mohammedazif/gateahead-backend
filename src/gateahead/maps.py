@@ -106,7 +106,7 @@ def _place_hint(place: str) -> tuple[float, float] | None:
     try:
         from geopy.geocoders import Nominatim
 
-        geo = Nominatim(user_agent="smartrail-gate-alert", timeout=10)
+        geo = Nominatim(user_agent="gateahead", timeout=10)
         for query in queries:
             if not query:
                 continue

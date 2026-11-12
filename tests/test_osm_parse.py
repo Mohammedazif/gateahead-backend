@@ -1,4 +1,4 @@
-from smartrail.osm import parse_overpass
+from gateahead.osm import parse_overpass
 
 
 def test_parse_overpass_splits_crossings_stations_rails():

@@ -7,14 +7,14 @@ import time
 
 import aiohttp
 
-from smartrail.models import Halt
-from smartrail.store import Store
+from gateahead.models import Halt
+from gateahead.store import Store
 
 CATALOG_URL = "https://raw.githubusercontent.com/datameet/railways/master/stations.json"
 _CODE = re.compile(r"^[A-Z]{1,5}$")
 _HALT = re.compile(r"\bhalt\b", re.I)
 _HEADERS = {
-    "User-Agent": "SmartRail/0.3 (https://github.com/Mohammedazif/smartrail-tele)",
+    "User-Agent": "GateAhead/0.3 (https://github.com/Mohammedazif/gateahead-tele)",
     "Accept": "application/json",
 }
 _failed_at = 0.0
@@ -120,7 +120,7 @@ async def ensure_catalog(session: aiohttp.ClientSession, store: Store) -> int:
 def main() -> None:
     import argparse
 
-    from smartrail.config import load_settings
+    from gateahead.config import load_settings
 
     parser = argparse.ArgumentParser(description="Load the station and halt catalog")
     parser.add_argument("--refresh", action="store_true")

@@ -1,4 +1,4 @@
-from smartrail.maps import coords_from_url, looks_like_maps
+from gateahead.maps import coords_from_url, looks_like_maps
 
 
 def test_coords_from_google_maps_at():

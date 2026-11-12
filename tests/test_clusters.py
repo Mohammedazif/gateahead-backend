@@ -1,5 +1,5 @@
-from smartrail.clusters import cluster_crossings, gate_label
-from smartrail.models import Crossing
+from gateahead.clusters import cluster_crossings, gate_label
+from gateahead.models import Crossing
 
 
 def test_cluster_uses_road_and_station():

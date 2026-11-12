@@ -3,8 +3,8 @@ from __future__ import annotations
 import html
 import re
 
-from smartrail.clusters import cluster_crossings, maps_link, place_label
-from smartrail.models import Crossing
+from gateahead.clusters import cluster_crossings, maps_link, place_label
+from gateahead.models import Crossing
 
 
 def h(value: object) -> str:
@@ -25,7 +25,7 @@ def friendly_error(message: str | None) -> str:
 
 def start_text() -> str:
     return (
-        "<b>SmartRail</b>\n\n"
+        "<b>GateAhead</b>\n\n"
         "Alerts you before a railway crossing nearby is likely to close.\n"
         "No train number needed.\n\n"
         "/setlocation  your position\n"

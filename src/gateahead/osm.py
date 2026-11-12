@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 import aiohttp
 
-from smartrail.geo import distance_to_polyline, km
-from smartrail.models import Crossing, Station
+from gateahead.geo import distance_to_polyline, km
+from gateahead.models import Crossing, Station
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OVERPASS_URLS = (
@@ -15,7 +15,7 @@ OVERPASS_URLS = (
     "https://overpass.kumi.systems/api/interpreter",
 )
 OVERPASS_HEADERS = {
-    "User-Agent": "SmartRail/0.3 (https://github.com/Mohammedazif/smartrail-tele)",
+    "User-Agent": "GateAhead/0.3 (https://github.com/Mohammedazif/gateahead-tele)",
     "Accept": "application/json",
 }
 _CACHE_TTL = 900.0

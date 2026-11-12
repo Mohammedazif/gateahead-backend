@@ -4,12 +4,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 from telegram.error import TimedOut
 from telegram.ext import ContextTypes
 
-from smartrail.bot.formatters import friendly_error, h, help_text, nearby_text, predict_text, start_text
-from smartrail.maps import looks_like_maps, resolve_maps_url
-from smartrail.service import SmartRail
+from gateahead.bot.formatters import friendly_error, h, help_text, nearby_text, predict_text, start_text
+from gateahead.maps import looks_like_maps, resolve_maps_url
+from gateahead.service import GateAhead
 
 
-def svc(context: ContextTypes.DEFAULT_TYPE) -> SmartRail:
+def svc(context: ContextTypes.DEFAULT_TYPE) -> GateAhead:
     return context.application.bot_data["service"]
 
 

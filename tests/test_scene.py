@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta
 
-from smartrail.config import load_settings
-from smartrail.geo import km, stitch_rail
-from smartrail.models import Crossing, TrainPosition
-from smartrail.scene import build_scene
+from gateahead.config import load_settings
+from gateahead.geo import km, stitch_rail
+from gateahead.models import Crossing, TrainPosition
+from gateahead.scene import build_scene
 
 A = (12.00, 75.20)
 B = (12.01, 75.20)

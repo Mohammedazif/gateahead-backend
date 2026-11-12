@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from smartrail.geo import distance_to_polyline, meters
-from smartrail.models import Crossing, PinCheck
+from gateahead.geo import distance_to_polyline, meters
+from gateahead.models import Crossing, PinCheck
 
 
 def check_pin(

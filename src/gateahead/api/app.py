@@ -8,14 +8,14 @@ import aiohttp
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from smartrail.clusters import gate_label
-from smartrail.config import load_settings
-from smartrail.halts import clean_code, ensure_catalog
-from smartrail.place import lookup_place
-from smartrail.service import SmartRail
-from smartrail.store import Store
+from gateahead.clusters import gate_label
+from gateahead.config import load_settings
+from gateahead.halts import clean_code, ensure_catalog
+from gateahead.place import lookup_place
+from gateahead.service import GateAhead
+from gateahead.store import Store
 
-app = FastAPI(title="SmartRail")
+app = FastAPI(title="GateAhead")
 _origins = [item.strip() for item in os.getenv("WEB_ORIGIN", "http://localhost:5173").split(",") if item.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -29,14 +29,14 @@ _WINDOW = 600.0
 _settings = load_settings()
 _store = Store(_settings.db_path)
 _session: aiohttp.ClientSession | None = None
-_service: SmartRail | None = None
+_service: GateAhead | None = None
 
 
 @app.on_event("startup")
 async def startup() -> None:
     global _session, _service
     _session = aiohttp.ClientSession()
-    _service = SmartRail(_settings, _store, _session)
+    _service = GateAhead(_settings, _store, _session)
     await ensure_catalog(_session, _store)
 
 

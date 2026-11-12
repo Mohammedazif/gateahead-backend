@@ -1,4 +1,4 @@
-from smartrail.live import (
+from gateahead.live import (
     _choose_lts,
     _keep_notice,
     _normalize_lts,
@@ -89,7 +89,7 @@ def test_late_train_with_current_station_is_usable():
 
 
 def test_position_keeps_the_run_detail():
-    from smartrail.live import position_from_lts
+    from gateahead.live import position_from_lts
 
     position = position_from_lts(
         "16649",
@@ -125,7 +125,7 @@ def test_position_keeps_the_run_detail():
 
 
 def test_html_fallback_reads_current_station():
-    from smartrail.live import _lts_from_html
+    from gateahead.live import _lts_from_html
 
     html = 'https://www.railyatri.in/live-train-status-user-feedback?train_no=12617&amp;eta=17:30&amp;start_date=2026-09-21 10:30&amp;current_station=PAY&amp;status=false'
     lts = _lts_from_html(html, "12617")

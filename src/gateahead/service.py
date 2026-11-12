@@ -5,17 +5,17 @@ from datetime import datetime
 
 import aiohttp
 
-from smartrail.clusters import cluster_crossings
-from smartrail.config import Settings
-from smartrail.erail import train_rows
-from smartrail.geo import km, stitch_rail
-from smartrail.live import LiveLook, fetch_live, position_from_lts
-from smartrail.models import Crossing, Halt, PinCheck, SavedRoute, Station, TrainPosition, User
-from smartrail.osm import OsmAround, OsmClient
-from smartrail.predict import crossing_is_ahead, eta_minutes, route_eta
-from smartrail.scene import build_scene
-from smartrail.store import Store
-from smartrail.timetable import (
+from gateahead.clusters import cluster_crossings
+from gateahead.config import Settings
+from gateahead.erail import train_rows
+from gateahead.geo import km, stitch_rail
+from gateahead.live import LiveLook, fetch_live, position_from_lts
+from gateahead.models import Crossing, Halt, PinCheck, SavedRoute, Station, TrainPosition, User
+from gateahead.osm import OsmAround, OsmClient
+from gateahead.predict import crossing_is_ahead, eta_minutes, route_eta
+from gateahead.scene import build_scene
+from gateahead.store import Store
+from gateahead.timetable import (
     BEND_HALF_KM,
     Call,
     classify_passage,
@@ -27,7 +27,7 @@ from smartrail.timetable import (
     timetable_call,
     waiting_position,
 )
-from smartrail.verify import check_pin
+from gateahead.verify import check_pin
 
 _FETCH = 16
 _DISCOVER_CAP = 30
@@ -35,9 +35,30 @@ _DISCOVER_BATCH = 10
 _ROUTE_HOURS = 24 * 7
 _ROUTE_FETCH = 4
 _NEAR_KM = 2.0
+_SAME_GATE_M = 40.0
 
 
-class SmartRail:
+def merge_saved_crossings(osm: list[Crossing], saved: list[Crossing]) -> list[Crossing]:
+    merged = list(osm)
+    known = {crossing.id for crossing in osm}
+    for extra in saved:
+        if extra.id in known:
+            continue
+        if extra.source != "user" and _same_gate(extra, osm):
+            continue
+        merged.append(extra)
+        known.add(extra.id)
+    return merged
+
+
+def _same_gate(extra: Crossing, osm: list[Crossing]) -> bool:
+    for crossing in osm:
+        if km(extra.coords, crossing.coords) * 1000 <= _SAME_GATE_M:
+            return True
+    return False
+
+
+class GateAhead:
     def __init__(self, settings: Settings, store: Store, session: aiohttp.ClientSession):
         self.settings = settings
         self.store = store
@@ -46,15 +67,13 @@ class SmartRail:
 
     async def map_around(self, lat: float, lon: float) -> OsmAround:
         result = await self.osm.around(lat, lon, self.settings.nearby_radius_m)
+        saved = self.store.crossings_near(lat, lon, self.settings.nearby_radius_m)
         if result.error:
-            return result
-        crossings = list(result.crossings)
+            if not saved:
+                return result
+            return OsmAround(saved, [], [], False)
+        crossings = merge_saved_crossings(result.crossings, saved)
         stations = list(result.stations)
-        saved = self.store.public_crossings()
-        known_ids = {c.id for c in crossings}
-        for extra in saved:
-            if extra.id not in known_ids and km((lat, lon), extra.coords) * 1000 <= self.settings.nearby_radius_m:
-                crossings.append(extra)
         if stations:
             tagged = []
             for crossing in crossings:
@@ -324,7 +343,7 @@ def known_points(
 
 
 def _remember_osm(store: Store, stations: list[Station]) -> None:
-    from smartrail.halts import clean_code
+    from gateahead.halts import clean_code
 
     rows: list[Halt] = []
     for station in stations:

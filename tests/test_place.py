@@ -1,6 +1,6 @@
 import asyncio
 
-from smartrail.place import clear_place_cache, label_from_address, lookup_place
+from gateahead.place import clear_place_cache, label_from_address, lookup_place
 
 
 def setup_function() -> None:

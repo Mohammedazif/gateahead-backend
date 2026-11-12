@@ -4,13 +4,13 @@ import logging
 
 from telegram.ext import ContextTypes
 
-from smartrail.service import SmartRail
+from gateahead.service import GateAhead
 
 logger = logging.getLogger(__name__)
 
 
 async def poll_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
-    service: SmartRail = context.application.bot_data["service"]
+    service: GateAhead = context.application.bot_data["service"]
     users = service.store.subscribed_users()
     for user in users:
         if user.lat is None:

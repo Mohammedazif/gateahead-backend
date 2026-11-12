@@ -1,4 +1,4 @@
-from smartrail.bot.formatters import friendly_error, help_text, predict_text, start_text
+from gateahead.bot.formatters import friendly_error, help_text, predict_text, start_text
 
 
 def test_errors_are_human():
@@ -50,8 +50,8 @@ def test_predict_hides_vendor_names():
 
 
 def nearby_sample() -> str:
-    from smartrail.bot.formatters import nearby_text
-    from smartrail.models import Crossing
+    from gateahead.bot.formatters import nearby_text
+    from gateahead.models import Crossing
 
     return nearby_text([(Crossing("a", "Gate", 12.08, 75.20, "osm"), 0.2)])
 

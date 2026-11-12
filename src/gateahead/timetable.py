@@ -7,11 +7,11 @@ from datetime import datetime, timedelta
 
 import aiohttp
 
-from smartrail.config import Settings
-from smartrail.geo import along_route, closest_on_segment
-from smartrail.halts import clean_code
-from smartrail.models import Crossing, RouteStop, SavedRoute, TrainPosition
-from smartrail.predict import classify
+from gateahead.config import Settings
+from gateahead.geo import along_route, closest_on_segment
+from gateahead.halts import clean_code
+from gateahead.models import Crossing, RouteStop, SavedRoute, TrainPosition
+from gateahead.predict import classify
 
 _URL = "https://www.railyatri.in/time-table/{number}"
 _NEXT = re.compile(

@@ -8,8 +8,8 @@ from datetime import date, datetime, timedelta
 
 import aiohttp
 
-from smartrail.geo import interpolate, km
-from smartrail.models import Direction, TrainPosition
+from gateahead.geo import interpolate, km
+from gateahead.models import Direction, TrainPosition
 
 _NEXT_DATA = re.compile(
     r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',

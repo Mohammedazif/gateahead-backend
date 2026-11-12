@@ -1,4 +1,4 @@
-# SmartRail API
+# GateAhead API
 
 India-wide railway level-crossing alerts. This repository is the Python service: FastAPI and the Telegram bot. The website and the phone app are separate repositories.
 
@@ -20,13 +20,13 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env   # set TELEGRAM_BOT_TOKEN
 pytest
-python -m smartrail.bot
+python -m gateahead.bot
 ```
 
 HTTP API (same engine):
 
 ```bash
-uvicorn smartrail.api.app:app --host 0.0.0.0 --port 8000
+uvicorn gateahead.api.app:app --host 0.0.0.0 --port 8000
 ```
 
 The website calls this API under `/api`.
@@ -34,7 +34,7 @@ The website calls this API under `/api`.
 ## Layout
 
 ```
-src/smartrail/     domain + Telegram + FastAPI
+src/gateahead/     domain + Telegram + FastAPI
   osm.py           Overpass (crossings, stations, rails)
   verify.py        user pin checks
   erail.py         trains between two station codes

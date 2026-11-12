@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from smartrail.geo import km
-from smartrail.models import Crossing
+from gateahead.geo import km
+from gateahead.models import Crossing
 
 RADIUS_KM = 0.35
 

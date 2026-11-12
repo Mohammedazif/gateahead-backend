@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from smartrail.halts import halt_kind, parse_station_catalog
-from smartrail.models import Halt, Station
-from smartrail.service import known_points
-from smartrail.store import Store
+from gateahead.halts import halt_kind, parse_station_catalog
+from gateahead.models import Halt, Station
+from gateahead.service import known_points
+from gateahead.store import Store
 
 
 def _feature(code: str, name: str, lon: float | None, lat: float | None, zone: str = "SR") -> dict:

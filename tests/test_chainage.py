@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta
 
-from smartrail.config import load_settings
-from smartrail.geo import along_route
-from smartrail.models import Crossing, TrainPosition
-from smartrail.predict import route_eta
+from gateahead.config import load_settings
+from gateahead.geo import along_route
+from gateahead.models import Crossing, TrainPosition
+from gateahead.predict import route_eta
 
 ROUTE = [(12.00, 75.20), (12.00, 75.30), (12.08, 75.30)]
 STATIONS = {"CAN": (12.00, 75.20), "TLY": (12.08, 75.30)}
@@ -81,7 +81,7 @@ def test_a_station_pin_beside_the_train_does_not_reverse_it():
 
 
 def test_the_joined_rail_keeps_the_next_gate_ahead_of_the_station():
-    from smartrail.service import _crossing_eta
+    from gateahead.service import _crossing_eta
 
     south = (11.99, 75.20)
     station = (12.00, 75.20)

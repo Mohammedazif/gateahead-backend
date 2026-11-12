@@ -2,12 +2,12 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from smartrail.config import load_settings
-from smartrail.live import classify_live
-from smartrail.models import Crossing, Halt, SavedRoute, TrainPosition
-from smartrail.service import positions_from_looks, resolve_position
-from smartrail.store import Store
-from smartrail.timetable import (
+from gateahead.config import load_settings
+from gateahead.live import classify_live
+from gateahead.models import Crossing, Halt, SavedRoute, TrainPosition
+from gateahead.service import positions_from_looks, resolve_position
+from gateahead.store import Store
+from gateahead.timetable import (
     Call,
     list_status,
     merge_call,
