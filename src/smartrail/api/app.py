@@ -151,8 +151,17 @@ async def gates(lat: float = Query(...), lon: float = Query(...)) -> dict:
     }
 
 
+def _caller(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip() or "unknown"
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
 def _limit(request: Request) -> None:
-    ip = request.client.host if request.client else "unknown"
+    ip = _caller(request)
     now = time.monotonic()
     recent = [stamp for stamp in _HITS[ip] if now - stamp < _WINDOW]
     if len(recent) >= _LIMIT:
