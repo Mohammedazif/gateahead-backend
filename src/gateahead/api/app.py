@@ -8,6 +8,7 @@ import aiohttp
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from gateahead.cities import search_cities
 from gateahead.clusters import gate_label
 from gateahead.config import load_settings
 from gateahead.halts import clean_code, ensure_catalog
@@ -49,6 +50,19 @@ async def shutdown() -> None:
 @app.get("/health")
 async def health() -> dict:
     return {"ok": True}
+
+
+@app.get("/cities")
+async def cities(q: str = Query(""), limit: int = Query(8, ge=1, le=20)) -> dict:
+    query = " ".join(q.split())
+    if len(query) < 2:
+        raise HTTPException(status_code=400, detail="Search needs at least 2 letters")
+    found = search_cities(query, limit)
+    return {
+        "cities": [
+            {"name": city.name, "state": city.state, "lat": city.lat, "lon": city.lon} for city in found
+        ]
+    }
 
 
 @app.get("/place")
