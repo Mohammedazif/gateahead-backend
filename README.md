@@ -31,6 +31,29 @@ uvicorn gateahead.api.app:app --host 0.0.0.0 --port 8000
 
 The website calls this API under `/api`.
 
+## Shared snapshots and community reports
+
+Live train responses are cached for 90 seconds in SQLite, preserving their fetch time so report age continues increasing between checks. API and bot processes using the same database share snapshots and fetch leases, including concurrent checks. Separate hosts need a shared storage design before they can share this cache. The cache reduces provider traffic; it does not improve source freshness or establish an upstream request allowance.
+
+`GET /predict` includes `generated_at`, `refresh_after_seconds`, and `gate_predictions`. Each gate prediction has its own `id`, train, ETA, barrier lead time, status, basis, and report age. Grouped approaching rows list only gates still ahead; clients must not apply a cluster's minimum ETA to every gate. Approaching trains include `basis` and `age_min`; scene trains also include their estimation basis and `position_on_segment`. That flag is false when a distant position would otherwise be clamped to the end of the short displayed track. Clients use it to avoid placing a faraway train beside the gate. Scene trains include `snapshot_at` (Unix seconds) and optional `motion` (`direction` on the rail, `speed_kmh`, `valid_for_sec`). For a closed crossing, the drawn track expands to include the estimated approaching position. The motion validity window ends when the source report reaches eight minutes old. Clients use the crossing ETA to estimate movement in real time, bounded by that validity window; they must not replay a fixed-duration crossing when a scene opens. Stopped trains, reports at least eight minutes old, uncertain timings, and unknown travel directions omit `motion`. Later timetable estimates remain available in crossing details. Clients keep prediction labels separate from actual barrier observations.
+
+Train names from existing discovery and live payloads are retained in SQLite and applied to timetable-only positions, without additional provider requests. A live name takes precedence; when no official name is available, the route endpoints provide a description instead.
+
+`GET /reports?crossing_id=...` returns recent, unverified community observations. `POST /reports` accepts `crossing_id`, `installation_id`, `state` (`open`, `closed`, or `wrong_location`), `lat`, and `lon`. Submissions are checked against the mapped crossing, replace that installation's previous observation for the same gate, and expire after ten minutes. Installation identifiers are hashed and excluded from responses. Reports do not alter predictions or train alerts.
+
+Predictions and scenes retain their shared limit of 20 requests per IP per ten minutes and now return `Retry-After` when limited. Report submissions have a separate limit of ten per IP per ten minutes. Listing reports does not fetch train data.
+
+## Gate timing
+
+`/predict` and `/scene` give two numbers for each train at a crossing:
+
+- `eta` / `eta_min`: minutes until the train reaches the crossing.
+- `closes_in` / `closes_in_min`: minutes until the barrier comes down. This is `eta` minus `GATE_LEAD_MIN` (default 5). Zero or less predicts that the barrier is down; this is not a physical barrier observation.
+
+A train stays `closed` until 2 minutes after its estimated arrival, because the barrier stays down while it clears the road. After that it moves to the `passed` list for 5 minutes, where `ago` / `ago_min` says how many minutes ago it went over.
+
+The minute-by-minute simulator that checks these numbers lives outside this repository, in `../simulator`.
+
 ## Layout
 
 ```

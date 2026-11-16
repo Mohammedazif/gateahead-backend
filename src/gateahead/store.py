@@ -64,6 +64,10 @@ class Store:
               fetched_at TEXT NOT NULL,
               run_days TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS train_names (
+              train_number TEXT PRIMARY KEY,
+              name TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS train_stops (
               train_number TEXT NOT NULL,
               seq INTEGER NOT NULL,
@@ -339,6 +343,25 @@ class Store:
             wanted,
         ).fetchall()
         return {str(row["code"]): (row["lat"], row["lon"]) for row in rows}
+
+    def remember_train_names(self, names: dict[str, str]) -> None:
+        rows = [(number, " ".join(name.split())) for number, name in names.items() if name and name.strip() and name.strip() != number]
+        if not rows:
+            return
+        self._conn.executemany(
+            "INSERT INTO train_names (train_number, name) VALUES (?, ?) "
+            "ON CONFLICT(train_number) DO UPDATE SET name=excluded.name", rows,
+        )
+        self._conn.commit()
+
+    def train_names(self, numbers: list[str]) -> dict[str, str]:
+        if not numbers:
+            return {}
+        slots = ",".join("?" for _ in numbers)
+        rows = self._conn.execute(
+            f"SELECT train_number, name FROM train_names WHERE train_number IN ({slots})", numbers,
+        ).fetchall()
+        return {row["train_number"]: row["name"] for row in rows}
 
     def save_route(self, number: str, stops: list[RouteStop], run_days: str = "") -> None:
         self._conn.execute("DELETE FROM train_stops WHERE train_number = ?", (number,))

@@ -13,6 +13,41 @@ def test_normalize_dict():
     assert _normalize_lts(raw)["current_station_code"] == "PAY"
 
 
+def test_cached_live_report_ages_between_predict_and_scene_without_another_fetch(tmp_path, monkeypatch):
+    import asyncio
+    from datetime import datetime, timedelta
+    import gateahead.live as live
+    from gateahead.service import resolve_position
+    from gateahead.snapshots import SnapshotCache
+
+    now = datetime(2026, 11, 16, 14, 16)
+    elapsed = [0]
+    monkeypatch.setattr(live.time, "time", lambda: now.timestamp() + elapsed[0])
+    calls = []
+
+    async def fetch(session, number):
+        calls.append(number)
+        return live.LiveLook({"success": True, "current_station_code": "CAN", "cur_stn_lat": 12, "cur_stn_lng": 75,
+                              "status": "T", "status_as_of_min": 1}, "", False)
+
+    monkeypatch.setattr(live, "_fetch_live_data", fetch)
+
+    async def run():
+        cache = SnapshotCache(tmp_path / "cache.db")
+        try:
+            first = await live.fetch_live(None, "16606", cache)
+            elapsed[0] = 60
+            second = await live.fetch_live(None, "16606", cache)
+            assert first.fetched_at == second.fetched_at
+            position = resolve_position("16606", second, None, now + timedelta(seconds=60))
+            assert position.age_minutes == 2
+            assert calls == ["16606"]
+        finally:
+            await cache.shutdown()
+
+    asyncio.run(run())
+
+
 def test_normalize_list_picks_running_instance():
     raw = [
         {"success": True, "at_src": True, "train_start_date": "2026-09-21"},

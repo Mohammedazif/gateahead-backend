@@ -45,7 +45,7 @@ class Settings:
     duplicate_m: float
     approaching_eta_min: float
     closing_soon_eta_min: float
-    closed_eta_min: float
+    gate_lead_min: float
     max_ahead_km: float
     default_speed_kmh: float
     alert_poll_seconds: int
@@ -67,7 +67,7 @@ def load_settings() -> Settings:
         duplicate_m=float(os.getenv("DUPLICATE_M", "250")),
         approaching_eta_min=float(os.getenv("APPROACHING_ETA_MIN", "30")),
         closing_soon_eta_min=float(os.getenv("CLOSING_SOON_ETA_MIN", "10")),
-        closed_eta_min=float(os.getenv("CLOSED_ETA_MIN", "3")),
+        gate_lead_min=float(os.getenv("GATE_LEAD_MIN", "5")),
         max_ahead_km=float(os.getenv("MAX_AHEAD_KM", "80")),
         default_speed_kmh=float(os.getenv("DEFAULT_SPEED_KMH", "60")),
         alert_poll_seconds=int(os.getenv("ALERT_POLL_SECONDS", "180")),

@@ -9,6 +9,12 @@ _TRAIN_ON_RAIL_KM = 8.0
 _END_SLACK_KM = 0.4
 _MOVED_KM = 0.4
 _BRACKET_KM = 15.0
+# Live positions come in whole kilometres, so a train reported a little past the gate may still be on it.
+_PAST_KM = 0.6
+# The barrier stays down while the train clears it, and the estimate is never exact to the minute.
+PASS_GRACE_MIN = 2.0
+# How long a train that just went over a gate stays listed as passed.
+JUST_PASSED_MIN = 5.0
 
 
 def crossing_is_ahead(position: TrainPosition, crossing: Crossing) -> bool:
@@ -84,7 +90,8 @@ def route_eta(
     if forward is None:
         return False, None, None
     ahead_km = (cross_km - train_km) * forward
-    if ahead_km < -0.15:
+    if ahead_km < -_PAST_KM:
+        # Passed. rail_passed_ago says how long ago.
         return True, None, None
     ahead_km = max(0.0, ahead_km)
     bracket = _bracket(position, last_km, next_km)
@@ -96,6 +103,36 @@ def route_eta(
     travelled = (settings.default_speed_kmh * max(0.0, position.age_minutes)) / 60.0
     remaining = ahead_km - travelled
     return True, (remaining / settings.default_speed_kmh) * 60.0, bracket
+
+
+def rail_passed_ago(
+    position: TrainPosition,
+    crossing: Crossing,
+    route: list[tuple[float, float]],
+    stations: dict[str, tuple[float, float]],
+    settings: Settings,
+) -> float | None:
+    """Minutes since the train went over the crossing, when the rail shows it already past."""
+    cross_km = _along(route, crossing.coords, _ON_RAIL_KM)
+    train_km = _along(route, position.coords, _TRAIN_ON_RAIL_KM)
+    if cross_km is None or train_km is None or not settings.default_speed_kmh:
+        return None
+    forward = _forward(
+        train_km,
+        _station_km(route, stations, position.last_station),
+        _station_km(route, stations, position.next_station),
+    )
+    if forward is None:
+        return None
+    past_km = (train_km - cross_km) * forward
+    if past_km < 0:
+        return None
+    return past_km / settings.default_speed_kmh * 60.0 + max(0.0, position.age_minutes)
+
+
+def closes_in(eta: float, settings: Settings) -> float:
+    """Minutes until the barrier comes down; zero or less means it is down now."""
+    return eta - settings.gate_lead_min
 
 
 def _along(route: list[tuple[float, float]], point: tuple[float, float], max_off_km: float) -> float | None:
@@ -169,9 +206,9 @@ def _clock_eta(
 def classify(eta: float | None, settings: Settings) -> str:
     if eta is None:
         return "open"
-    if eta < -1:
+    if eta < -PASS_GRACE_MIN:
         return "passed"
-    if eta <= settings.closed_eta_min:
+    if eta <= settings.gate_lead_min:
         return "closed"
     if eta <= settings.closing_soon_eta_min:
         return "closing_soon"

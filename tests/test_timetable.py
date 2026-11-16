@@ -77,9 +77,10 @@ def test_lateness_is_measured_from_the_clock_not_added_twice():
         _train(delay_minutes=20, as_of=datetime(2026, 11, 12, 5, 0), run="at", at_station=True),
         gate,
     )
+    # Left ten minutes early; the report from that moment is ten minutes old now.
     early = timetable_call(
         stops,
-        _train(delay_minutes=-10, as_of=datetime(2026, 11, 12, 5, 0)),
+        _train(delay_minutes=-10, as_of=datetime(2026, 11, 12, 5, 0), age_minutes=10),
         gate,
     )
     stale = timetable_call(
@@ -145,6 +146,8 @@ def test_a_run_that_crossed_midnight_uses_yesterdays_clock():
             delay_minutes=10,
             run="departed",
             as_of=datetime(2026, 11, 13, 0, 30),
+            # The report is from the 23:32 departure, ten minutes late.
+            age_minutes=58,
         ),
         Crossing("g", "Gate", 13.18, 76.0, "osm"),
     )

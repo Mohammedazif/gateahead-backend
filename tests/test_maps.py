@@ -6,7 +6,8 @@ def test_coords_from_google_maps_at():
     assert coords_from_url(url) == (12.13541, 75.17722)
 
 
-def test_plus_code_in_share_url_with_extra_query():
+def test_plus_code_in_share_url_with_extra_query(monkeypatch):
+    monkeypatch.setattr("gateahead.maps._place_hint", lambda place: (12.085, 75.20))
     url = (
         "https://www.google.com/maps?q=36J3+4R7+Kandangali+Railway+Gate,+Keralam+670307"
         "&ftid=0x3ba46d3d1a7d7177:0xd7de20011d646837&entry=gps"

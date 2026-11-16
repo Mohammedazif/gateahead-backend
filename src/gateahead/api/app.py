@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import os
+import math
 import time
 from collections import defaultdict
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 import aiohttp
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -14,6 +18,7 @@ from gateahead.config import load_settings
 from gateahead.halts import clean_code, ensure_catalog
 from gateahead.place import lookup_place
 from gateahead.service import GateAhead
+from gateahead.reports import Reports
 from gateahead.store import Store
 
 app = FastAPI(title="GateAhead")
@@ -21,14 +26,16 @@ _origins = [item.strip() for item in os.getenv("WEB_ORIGIN", "http://localhost:5
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
+    expose_headers=["Retry-After"],
 )
 _HITS: dict[str, list[float]] = defaultdict(list)
 _LIMIT = 20
 _WINDOW = 600.0
 _settings = load_settings()
 _store = Store(_settings.db_path)
+_reports = Reports(_settings.db_path)
 _session: aiohttp.ClientSession | None = None
 _service: GateAhead | None = None
 
@@ -43,6 +50,8 @@ async def startup() -> None:
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
+    if _service:
+        await _service.snapshots.shutdown()
     if _session:
         await _session.close()
 
@@ -174,12 +183,13 @@ def _caller(request: Request) -> str:
     return "unknown"
 
 
-def _limit(request: Request) -> None:
-    ip = _caller(request)
+def _limit(request: Request, bucket: str = "predictions", cap: int = _LIMIT) -> None:
+    ip = f"{bucket}:{_caller(request)}"
     now = time.monotonic()
     recent = [stamp for stamp in _HITS[ip] if now - stamp < _WINDOW]
-    if len(recent) >= _LIMIT:
-        raise HTTPException(status_code=429, detail="Slow down and try again in a few minutes.")
+    if len(recent) >= cap:
+        retry = max(1, math.ceil(_WINDOW - (now - recent[0])))
+        raise HTTPException(status_code=429, detail="Slow down and try again in a few minutes.", headers={"Retry-After": str(retry)})
     recent.append(now)
     _HITS[ip] = recent
 
@@ -201,3 +211,28 @@ async def scene(
     _limit(request)
     assert _service is not None
     return await _service.scene_here(lat, lon, crossing_id)
+
+
+class GateReport(BaseModel):
+    crossing_id: str = Field(min_length=1, max_length=120)
+    installation_id: str = Field(min_length=16, max_length=80, pattern=r"^[A-Za-z0-9-]+$")
+    state: Literal["open", "closed", "wrong_location"]
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
+
+
+@app.get("/reports")
+async def reports(crossing_id: str = Query(..., min_length=1, max_length=120)) -> dict:
+    return _reports.recent(crossing_id)
+
+
+@app.post("/reports")
+async def report(request: Request, body: GateReport) -> dict:
+    _limit(request, "reports", 10)
+    assert _service is not None
+    mapped = await _service.map_around(body.lat, body.lon)
+    if mapped.error:
+        raise HTTPException(status_code=503, detail="Crossing could not be verified. Try again later.")
+    if not any(gate.id == body.crossing_id for gate in mapped.crossings):
+        raise HTTPException(status_code=404, detail="Crossing not found at this location.")
+    return _reports.submit(body.crossing_id, body.installation_id, body.state)

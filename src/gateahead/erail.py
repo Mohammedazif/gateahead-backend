@@ -30,6 +30,22 @@ def parse_train_numbers(body: str) -> list[str]:
     return [number for number, _clock in parse_train_rows(body)]
 
 
+def parse_train_names(body: str) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for chunk in body.split("^"):
+        parts = chunk.split("~")
+        if len(parts) < 2:
+            continue
+        number, name = parts[0].strip(), " ".join(parts[1].split())
+        if re.fullmatch(r"\d{5}", number) and name and name != number:
+            names.setdefault(number, name)
+    return names
+
+
+def known_train_names(numbers: list[str]) -> dict[str, str]:
+    return {number: _names[number] for number in numbers if number in _names}
+
+
 def _clock_minutes(value: str) -> int | None:
     text = value.strip().replace(".", ":")
     pieces = text.split(":")
@@ -48,6 +64,7 @@ def _clock_minutes(value: str) -> int | None:
 
 _TTL = 600.0
 _cache: dict[tuple[str, str], tuple[float, list[tuple[str, int | None]]]] = {}
+_names: dict[str, str] = {}
 
 
 async def train_rows(
@@ -71,7 +88,9 @@ async def train_rows(
         async with session.get(url, params=params, headers=_HEADERS, timeout=timeout) as response:
             if response.status != 200:
                 return []
-            rows = parse_train_rows(await response.text())
+            body = await response.text()
+            rows = parse_train_rows(body)
+            _names.update(parse_train_names(body))
     except (aiohttp.ClientError, TimeoutError):
         return []
     _cache[key] = (now, rows)

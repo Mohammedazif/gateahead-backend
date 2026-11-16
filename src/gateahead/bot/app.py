@@ -41,6 +41,9 @@ def build_application() -> Application:
         )
 
     async def post_shutdown(app: Application) -> None:
+        service = app.bot_data.get("service")
+        if service is not None:
+            await service.snapshots.shutdown()
         session = app.bot_data.get("http")
         if session is not None:
             await session.close()

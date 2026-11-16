@@ -5,6 +5,7 @@ import re
 
 from gateahead.clusters import cluster_crossings, maps_link, place_label
 from gateahead.models import Crossing
+from gateahead.predict import PASS_GRACE_MIN
 
 
 def h(value: object) -> str:
@@ -82,8 +83,10 @@ def predict_text(scan: dict) -> str:
     if scan.get("error"):
         return friendly_error(str(scan["error"]))
     approaching = scan.get("approaching") or []
+    passed = scan.get("passed") or []
+    gone = {row["train"] for row in passed}
     sightings = [s for s in (scan.get("sightings") or []) if s.get("age", 0) < 45]
-    live = [s for s in sightings if not s.get("passed_local")]
+    live = [s for s in sightings if not s.get("passed_local") and s["number"] not in gone]
     grouped: dict[str, list] = {}
     for row in approaching:
         grouped.setdefault(row["train"], []).append(row)
@@ -101,15 +104,21 @@ def predict_text(scan: dict) -> str:
                 if row.get("lat") is not None:
                     label = place_label(row["cluster"], row["lat"], row["lon"])
                 lines.append(
-                    f"• {h(label)}: {_eta_label(row['eta'])}, {row['from_you_km']:.1f} km from you"
+                    f"• {h(label)}: {gate_label(row['eta'], row.get('closes_in'))}, {row['from_you_km']:.1f} km from you"
                 )
             lines.append("")
-    elif live:
+    elif live or passed:
         lines.append("No train is close enough to close a crossing near you right now.")
         lines.append("")
     else:
         lines.append("No live trains reported on this stretch right now.")
         return "\n".join(lines)
+    if passed:
+        lines.append("<b>Just passed</b>")
+        for row in passed[:6]:
+            title = f"{h(row['train'])} {h(row.get('name') or '')}".strip()
+            lines.append(f"• {title} {passed_label(row['ago'])} at {h(row['cluster'])}")
+        lines.append("")
     if live:
         lines.append("<b>On this line</b>")
         for s in live[:6]:
@@ -124,13 +133,27 @@ def predict_text(scan: dict) -> str:
     return "\n".join(lines).rstrip()
 
 
-def _eta_label(minutes: float | None) -> str:
-    if minutes is None:
+def gate_label(eta: float | None, closes: float | None = None) -> str:
+    """What a person at the gate needs: when the barrier comes down, or that it is down."""
+    if eta is None:
         return ""
-    if minutes < -1:
+    if eta < -PASS_GRACE_MIN:
         return "already passed"
-    if minutes <= 1:
+    down_in = eta if closes is None else closes
+    if down_in <= 0:
+        return "closed, train passing" if eta <= 1 else f"closed, train in {eta:.0f} min"
+    if down_in < 1:
         return "closing now"
+    return f"closes in {_span_label(down_in)}"
+
+
+def passed_label(ago: float) -> str:
+    if ago < 1:
+        return "passed just now"
+    return f"passed {ago:.0f} min ago"
+
+
+def _span_label(minutes: float) -> str:
     if minutes >= 60:
         hours = int(minutes // 60)
         mins = int(round(minutes - hours * 60))
@@ -138,6 +161,6 @@ def _eta_label(minutes: float | None) -> str:
             hours += 1
             mins = 0
         if mins == 0:
-            return f"closes in {hours} hr"
-        return f"closes in {hours} hr {mins} min"
-    return f"closes in {minutes:.0f} min"
+            return f"{hours} hr"
+        return f"{hours} hr {mins} min"
+    return f"{minutes:.0f} min"

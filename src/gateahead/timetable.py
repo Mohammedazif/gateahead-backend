@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -11,7 +12,7 @@ from gateahead.config import Settings
 from gateahead.geo import along_route, closest_on_segment
 from gateahead.halts import clean_code
 from gateahead.models import Crossing, RouteStop, SavedRoute, TrainPosition
-from gateahead.predict import classify
+from gateahead.predict import PASS_GRACE_MIN, classify
 
 _URL = "https://www.railyatri.in/time-table/{number}"
 _NEXT = re.compile(
@@ -23,6 +24,8 @@ _HEADERS = {
     "Accept": "text/html",
 }
 _GATE_OFF_KM = 2.0
+# A gate this far past a train's first or last stop is not on that train's run.
+_ROUTE_END_KM = 0.5
 _TRAIN_OFF_KM = 8.0
 _STOP_OFF_KM = 8.0
 _ON_RAIL_KM = 0.2
@@ -44,6 +47,8 @@ class TimetableCall:
     bracket: str | None
     slack: float
     placed: bool
+    # Minutes since the train went over the gate, when it already has.
+    ago: float | None = None
 
 
 @dataclass(frozen=True)
@@ -52,6 +57,7 @@ class Call:
     bracket: str | None
     source: str
     slack: float
+    ago: float | None = None
 
 
 def parse_timetable_html(html: str) -> list[RouteStop]:
@@ -276,6 +282,9 @@ def timetable_call(
     rail: list[tuple[float, float]] | None = None,
 ) -> TimetableCall:
     placed = train_place(stops, position)
+    if _past_route_end(stops, crossing.lat, crossing.lon):
+        # The train starts or ends before it reaches this gate.
+        return TimetableCall(None, None, 0, placed is not None)
     gate_km = project_km(stops, crossing.lat, crossing.lon, _GATE_OFF_KM)
     if gate_km is None and rail:
         gate_km = _km_on_rail(stops, crossing, rail)
@@ -287,15 +296,12 @@ def timetable_call(
     if train_clock is None or gate_clock is None:
         return TimetableCall(None, None, 0, False)
     if train_km > gate_km + 0.3:
-        return TimetableCall(None, None, 0, True)
-    eta = _eta_from_clock(position, train_clock, gate_clock)
-    # The clock can say the gate time has passed while the train is still kilometres short of it.
-    if eta < 0 and gate_km - train_km > 0.5:
-        eta = gate_clock - train_clock
-        if position.run != "at":
-            eta -= max(0.0, position.age_minutes)
-    if eta < -1:
-        return TimetableCall(None, None, 0, True)
+        ago = max(0.0, train_clock - gate_clock) + max(0.0, position.age_minutes)
+        return TimetableCall(None, None, 0, True, ago)
+    leave_clock = clock_at(stops, train_km, "depart") if mode == "arrive" else train_clock
+    eta = _eta_from_clock(position, train_clock, gate_clock, leave_clock)
+    if eta < -PASS_GRACE_MIN:
+        return TimetableCall(None, None, 0, True, -eta)
     span = _span(stops, gate_km)
     bracket = None
     if span and (span[1].km - span[0].km >= 15 or eta > 30):
@@ -308,12 +314,16 @@ def merge_call(
     eta: float | None,
     bracket: str | None,
     timed: TimetableCall | None,
+    standing: bool = False,
 ) -> Call:
     local = Call(eta if on_route else None, bracket if on_route else None, "rail" if on_route else "", 0.0)
     if timed is None:
         return local
+    # The distance guess only knows where the train is, not when a standing train will leave,
+    # so it may overrule the timetable only for a train that is already moving.
     if (
-        timed.placed
+        not standing
+        and timed.placed
         and timed.eta is not None
         and local.eta is not None
         and local.eta <= _CLOSE_TRUST_MIN
@@ -321,12 +331,12 @@ def merge_call(
     ):
         return local
     if timed.placed:
-        return Call(timed.eta, timed.bracket or local.bracket, "timetable", timed.slack)
+        return Call(timed.eta, timed.bracket or local.bracket, "timetable", timed.slack, timed.ago)
     return local
 
 
 def list_status(eta: float | None, slack: float, settings: Settings, sourced: bool) -> str | None:
-    if eta is None or eta < -1:
+    if eta is None or eta < -PASS_GRACE_MIN:
         return None
     if sourced and eta > _FAR_MIN:
         return None
@@ -342,11 +352,21 @@ def list_status(eta: float | None, slack: float, settings: Settings, sourced: bo
     return status
 
 
-def _eta_from_clock(position: TrainPosition, train_clock: float, gate_clock: float) -> float:
-    eta = (gate_clock + position.delay_minutes) - _run_now(position.as_of, train_clock, position.delay_minutes)
-    if position.run != "at":
-        eta -= max(0.0, position.age_minutes)
-    return eta
+def _eta_from_clock(
+    position: TrainPosition,
+    train_clock: float,
+    gate_clock: float,
+    leave_clock: float | None = None,
+) -> float:
+    age = max(0.0, position.age_minutes)
+    if position.run == "at" or position.at_station:
+        # A train standing at a station leaves at its timetable departure plus the delay it reports,
+        # and it cannot reach the gate sooner than the run from that station, counted from the report.
+        by_delay = (gate_clock + position.delay_minutes) - _run_now(position.as_of, train_clock, position.delay_minutes)
+        leave = train_clock if leave_clock is None else leave_clock
+        return max(by_delay, (gate_clock - leave) - age)
+    # A moving train: the timetable run from where it was reported, less the time since that report.
+    return (gate_clock - train_clock) - age
 
 
 def _run_now(as_of: datetime, train_clock: float, delay: int) -> float:
@@ -369,6 +389,45 @@ def project_km(
             best_off = offset
             best = origin.km + portion * (dest.km - origin.km)
     return best
+
+
+def _past_route_end(stops: list[RouteStop], lat: float, lon: float) -> bool:
+    """True when a point lies on the line carried on past the first or last stop, not between stops."""
+    usable = [stop for stop in stops if stop.lat is not None and stop.lon is not None]
+    if len(usable) < 2 or usable[0] is not stops[0] or usable[-1] is not stops[-1]:
+        return False
+    pairs = [(a, b) for a, b in zip(usable, usable[1:]) if b.km - a.km >= 0.05]
+    if not pairs:
+        return False
+    best: tuple[float, int, float] | None = None
+    for index, (origin, dest) in enumerate(pairs):
+        _point, portion, offset = closest_on_segment((lat, lon), (origin.lat, origin.lon), (dest.lat, dest.lon))
+        if best is None or offset < best[0]:
+            best = (offset, index, portion)
+    assert best is not None
+    _offset, index, portion = best
+    if index == len(pairs) - 1 and portion >= 1.0:
+        before, end = pairs[-1]
+    elif index == 0 and portion <= 0.0:
+        end, before = pairs[0]
+    else:
+        return False
+    along, side = _beyond(before, end, (lat, lon))
+    # Far to one side of the line is a different line, which the rail check decides.
+    return along > _ROUTE_END_KM and side <= _GATE_OFF_KM
+
+
+def _beyond(before: RouteStop, end: RouteStop, point: tuple[float, float]) -> tuple[float, float]:
+    """Km past `end` in the before->end direction, and km to the side of that line."""
+    scale_x = 111.32 * max(0.2, abs(math.cos(math.radians(end.lat or 0.0))))
+    ux = ((end.lon or 0.0) - (before.lon or 0.0)) * scale_x
+    uy = ((end.lat or 0.0) - (before.lat or 0.0)) * 110.57
+    norm = math.hypot(ux, uy)
+    if norm < 1e-6:
+        return 0.0, 0.0
+    gx = (point[1] - (end.lon or 0.0)) * scale_x
+    gy = (point[0] - (end.lat or 0.0)) * 110.57
+    return (gx * ux + gy * uy) / norm, abs(gx * uy - gy * ux) / norm
 
 
 def train_place(stops: list[RouteStop], position: TrainPosition) -> tuple[float, str] | None:

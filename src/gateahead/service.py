@@ -1,30 +1,31 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime
 
 import aiohttp
 
 from gateahead.clusters import cluster_crossings
 from gateahead.config import Settings
-from gateahead.erail import train_rows
+from gateahead.erail import known_train_names, train_rows
 from gateahead.geo import km, stitch_rail
 from gateahead.live import LiveLook, fetch_live, position_from_lts
 from gateahead.models import Crossing, Halt, PinCheck, SavedRoute, Station, TrainPosition, User
 from gateahead.osm import OsmAround, OsmClient
-from gateahead.predict import crossing_is_ahead, eta_minutes, route_eta
+from gateahead.gatecall import crossing_call as _crossing_eta
+from gateahead.gatecall import passed_ago
+from gateahead.predict import JUST_PASSED_MIN, closes_in
 from gateahead.scene import build_scene
 from gateahead.store import Store
+from gateahead.snapshots import SnapshotCache
 from gateahead.timetable import (
     BEND_HALF_KM,
-    Call,
     classify_passage,
     fetch_timetable,
     list_status,
     locate_stops,
-    merge_call,
     scheduled_position,
-    timetable_call,
     waiting_position,
 )
 from gateahead.verify import check_pin
@@ -64,6 +65,7 @@ class GateAhead:
         self.store = store
         self.session = session
         self.osm = OsmClient(session)
+        self.snapshots = SnapshotCache(store.path)
 
     async def map_around(self, lat: float, lon: float) -> OsmAround:
         result = await self.osm.around(lat, lon, self.settings.nearby_radius_m)
@@ -152,10 +154,10 @@ class GateAhead:
     async def scene_here(self, lat: float, lon: float, crossing_id: str) -> dict:
         mapped = await self.map_around(lat, lon)
         if mapped.error:
-            return {"available": False, "error": mapped.error, "rail": [], "trains": []}
+            return {"available": False, "error": mapped.error, "rail": [], "trains": [], "passed": []}
         crossing = next((item for item in mapped.crossings if item.id == crossing_id), None)
         if crossing is None:
-            return {"available": False, "error": "crossing_not_found", "rail": [], "trains": []}
+            return {"available": False, "error": "crossing_not_found", "rail": [], "trains": [], "passed": []}
         _numbers, positions, routes = await self._positions(mapped.stations, lat, lon)
         stations = known_points(mapped.stations, self.store.halts_near(lat, lon, 80, 500))
         return build_scene(
@@ -172,6 +174,7 @@ class GateAhead:
     ) -> tuple[list[str], list[TrainPosition], dict[str, SavedRoute]]:
         now = datetime.now()
         numbers = await self._discover_trains(stations)
+        self.store.remember_train_names(known_train_names(numbers))
         cached = self._cached_routes(numbers)
         hot: list[str] = []
         cold: list[str] = []
@@ -189,7 +192,7 @@ class GateAhead:
 
         async def one(number: str) -> tuple[str, LiveLook]:
             async with semaphore:
-                return number, await fetch_live(self.session, number)
+                return number, await fetch_live(self.session, number, self.snapshots)
 
         looks = dict(await asyncio.gather(*[one(number) for number in hot])) if hot else {}
         wanted = [
@@ -199,6 +202,7 @@ class GateAhead:
         ]
         routes = {number: cached[number] for number in cold if number in cached}
         routes.update(await self._routes(wanted))
+        now = datetime.now()
         positions = positions_from_looks(wanted, looks, routes, now)
         for number in cold:
             route = routes.get(number)
@@ -207,12 +211,16 @@ class GateAhead:
             placed = scheduled_position(number, route, lat, lon, now)
             if placed is not None:
                 positions.append(placed)
+        # Live names also help future timetable-only estimates after a restart.
+        self.store.remember_train_names({position.train_number: position.name for position in positions if position.name.strip()})
+        names = self.store.train_names(numbers)
+        positions = [name_position(position, names.get(position.train_number, ""), routes.get(position.train_number)) for position in positions]
         return numbers, positions, routes
 
     async def predict_here(self, lat: float, lon: float) -> dict:
         mapped = await self.map_around(lat, lon)
         if mapped.error:
-            return {"error": mapped.error, "crossings": 0, "stations": [], "checked": 0, "running": 0, "approaching": [], "sightings": []}
+            return {"error": mapped.error, "crossings": 0, "stations": [], "checked": 0, "running": 0, "approaching": [], "passed": [], "sightings": []}
         crossings, stations = mapped.crossings, mapped.stations
         clusters = cluster_crossings(crossings)
         focus = {
@@ -225,6 +233,8 @@ class GateAhead:
             focus = {cluster.id for cluster in nearest[:3]}
         numbers, positions, routes = await self._positions(stations, lat, lon)
         approaching: list[dict] = []
+        gate_predictions: list[dict] = []
+        just_passed: list[dict] = []
         sightings: list[dict] = []
         local_codes = {s.code.upper() for s in stations}
         station_xy = known_points(stations, self.store.halts_near(lat, lon, 80, 500))
@@ -242,53 +252,89 @@ class GateAhead:
                 continue
             best: tuple[float, object, str | None] | None = None
             hits = []
+            gone = []
             for cluster in clusters:
                 etas = []
+                gate_ids = []
+                agos = []
                 for crossing in cluster.crossings:
                     call = _crossing_eta(
                         position, crossing, rails, station_xy, self.settings, stops, chains.get(crossing.id)
                     )
+                    ago = passed_ago(call)
+                    if ago is not None:
+                        agos.append(ago)
                     status = list_status(call.eta, call.slack, self.settings, call.source == "timetable")
                     if status is None or call.eta is None:
                         continue
-                    etas.append((call.eta, call.bracket, status))
+                    etas.append((call.eta, call.bracket, status, call.source))
+                    gate_ids.append(crossing.id)
+                    if _cluster_is_shown(status, cluster.id in focus):
+                        gate_predictions.append({
+                            "id": crossing.id, "train": position.train_number, "name": position.name,
+                            "eta": round(call.eta, 1), "closes_in": round(closes_in(call.eta, self.settings), 1),
+                            "status": status, "basis": call.source, "age_min": round(position.age_minutes, 1),
+                        })
                 if not etas:
+                    if agos and cluster.id in focus and min(agos) <= JUST_PASSED_MIN:
+                        gone.append((cluster, min(agos)))
                     continue
-                soon, bracket, status = min(etas, key=lambda item: item[0])
+                soon, bracket, status, basis = min(etas, key=lambda item: item[0])
                 if not _cluster_is_shown(status, cluster.id in focus):
                     continue
-                hits.append((cluster, soon, bracket, status))
+                hits.append((cluster, soon, bracket, status, basis, gate_ids))
                 if best is None or soon < best[0]:
                     best = (soon, cluster, bracket)
-            passed_local = False if hits else _passed_local(position, lat, lon, local_codes)
+            passed_local = False if hits else bool(gone) or _passed_local(position, lat, lon, local_codes)
             if hits or _on_this_stretch(position, lat, lon, local_codes):
                 sightings.append(_sighting(position, best[0] if best else None, passed_local))
-            for cluster, soon, bracket, status in hits:
+            for cluster, soon, bracket, status, basis, gate_ids in hits:
                 row = {
                     "train": position.train_number,
                     "name": position.name,
                     "cluster": cluster.name,
-                    "count": len(cluster.crossings),
+                    "count": len(gate_ids),
                     "eta": round(soon, 1),
+                    "closes_in": round(closes_in(soon, self.settings), 1),
                     "status": status,
+                    "basis": basis,
+                    "age_min": round(position.age_minutes, 1),
                     "at_station": position.at_station,
                     "current": position.current_name,
                     "from_you_km": round(km((lat, lon), (cluster.lat, cluster.lon)), 2),
                     "lat": cluster.lat,
                     "lon": cluster.lon,
-                    "ids": [c.id for c in cluster.crossings],
+                    "ids": gate_ids,
                 }
                 if bracket:
                     row["bracket"] = bracket
                 row.update(_run_fields(position))
                 approaching.append(row)
+            for cluster, ago in gone:
+                just_passed.append(
+                    {
+                        "train": position.train_number,
+                        "name": position.name,
+                        "cluster": cluster.name,
+                        "ago": round(ago, 1),
+                        "from_you_km": round(km((lat, lon), (cluster.lat, cluster.lon)), 2),
+                        "lat": cluster.lat,
+                        "lon": cluster.lon,
+                        "ids": [c.id for c in cluster.crossings],
+                    }
+                )
         approaching.sort(key=lambda row: row["eta"])
+        just_passed.sort(key=lambda row: row["ago"])
         return {
+            "generated_at": datetime.now().astimezone().isoformat(),
+            "refresh_after_seconds": 120,
             "crossings": len(crossings),
             "stations": [s.code for s in stations[:4]],
             "checked": len(numbers),
             "running": len(positions),
+            "gate_predictions": sorted(gate_predictions, key=lambda row: row["eta"]),
             "approaching": approaching,
+            "passed": just_passed,
             "sightings": sightings,
         }
 
@@ -333,6 +379,22 @@ class GateAhead:
         return locate_stops(stops, self.store.halt_coords(missing))
 
 
+def name_position(position: TrainPosition, saved_name: str, route: SavedRoute | None) -> TrainPosition:
+    if position.name.strip() and position.name.strip() != position.train_number:
+        return position
+    name = saved_name.strip()
+    if name == position.train_number:
+        name = ""
+    if not name:
+        origin, destination = position.origin_name, position.dest_name
+        if route is not None and len(route.stops) >= 2:
+            origin = origin or route.stops[0].name
+            destination = destination or route.stops[-1].name
+        if origin and destination:
+            name = f"{origin} → {destination}"
+    return replace(position, name=name) if name else position
+
+
 def known_points(
     stations: list[Station], extra: list[tuple[Halt, float]]
 ) -> dict[str, tuple[float, float]]:
@@ -361,34 +423,16 @@ def _cluster_is_shown(status: str, in_focus: bool) -> bool:
     return status in {"closed", "closing_soon", "approaching"}
 
 
-def _crossing_eta(position, crossing, rails, stations, settings, stops=None, chain=None) -> Call:
-    local_on = False
-    local_eta = None
-    local_bracket = None
-    if chain is None and rails:
-        chain = stitch_rail(rails, crossing.coords, BEND_HALF_KM)
-    if chain is not None:
-        on_route, eta, bracket = route_eta(position, crossing, chain, stations, settings)
-        if on_route and eta is None:
-            return Call(None, None, "rail", 0)
-        if on_route:
-            local_on = True
-            local_eta = eta
-            local_bracket = bracket
-    if not local_on and crossing_is_ahead(position, crossing):
-        chord = eta_minutes(position, crossing, settings)
-        if chord is not None:
-            local_on = True
-            local_eta = chord
-    timed = timetable_call(stops, position, crossing, chain) if stops else None
-    return merge_call(local_on, local_eta, local_bracket, timed)
-
-
 def resolve_position(
     number: str, look: LiveLook, route: SavedRoute | None, now: datetime
 ) -> TrainPosition | None:
     if look.moving:
-        return position_from_lts(number, look.moving, now)
+        position = position_from_lts(number, look.moving, now)
+        if position is not None and look.fetched_at is not None:
+            # A cached provider report gets older; reopening a gate must not reset its ETA.
+            elapsed = max(0, now.timestamp() - look.fetched_at) / 60
+            position = replace(position, age_minutes=position.age_minutes + elapsed)
+        return position
     if look.finished or route is None:
         return None
     return waiting_position(number, route, now)

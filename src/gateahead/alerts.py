@@ -4,6 +4,7 @@ import logging
 
 from telegram.ext import ContextTypes
 
+from gateahead.bot.formatters import gate_label
 from gateahead.service import GateAhead
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ async def poll_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
             head = f"Train {number} {rows[0]['name']}"
             lines = [head, "Closing near you:"]
             for row in rows[:6]:
-                eta = "now" if row["eta"] <= 1 else f"{row['eta']:.0f} min"
+                eta = gate_label(row["eta"], row.get("closes_in"))
                 label = row["cluster"]
                 if row.get("lat") is not None:
                     label = f"{row['cluster']} ({row['lat']:.4f}, {row['lon']:.4f})"

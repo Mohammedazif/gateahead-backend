@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
 import aiohttp
 
 from gateahead.geo import interpolate, km
 from gateahead.models import Direction, TrainPosition
+from gateahead.snapshots import SnapshotCache
 
 _NEXT_DATA = re.compile(
     r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
@@ -33,17 +34,35 @@ class LiveLook:
     moving: dict | None
     notice: str
     finished: bool
+    fetched_at: float | None = None
 
 
 async def fetch_lts(session: aiohttp.ClientSession, train_number: str) -> dict | None:
     return (await fetch_live(session, train_number)).moving
 
 
-async def fetch_live(session: aiohttp.ClientSession, train_number: str) -> LiveLook:
+async def fetch_live(
+    session: aiohttp.ClientSession, train_number: str, cache: SnapshotCache | None = None
+) -> LiveLook:
     now = time.monotonic()
     hit = _lts_cache.get(train_number)
-    if hit and now - hit[0] < _LTS_TTL:
+    if cache is None and hit and now - hit[0] < _LTS_TTL:
         return hit[1]
+    if cache is not None:
+        async def load() -> dict:
+            look = await _fetch_live_data(session, train_number)
+            return {"moving": look.moving, "notice": look.notice, "finished": look.finished, "fetched_at": time.time()}
+
+        raw = await cache.get(f"live:{train_number}", _LTS_TTL, load)
+        look = LiveLook(raw["moving"], raw["notice"], raw["finished"], raw.get("fetched_at"))
+    else:
+        look = replace(await _fetch_live_data(session, train_number), fetched_at=time.time())
+    if cache is None:
+        _lts_cache[train_number] = (time.monotonic(), look)
+    return look
+
+
+async def _fetch_live_data(session: aiohttp.ClientSession, train_number: str) -> LiveLook:
     today = await _fetch_lts_api(session, train_number, 0)
     yesterday = None
     if not _on_the_move(today):
@@ -53,7 +72,6 @@ async def fetch_live(session: aiohttp.ClientSession, train_number: str) -> LiveL
         page = await _fetch_lts_page(session, train_number, None)
         if page is not None:
             look = classify_live(page, None)
-    _lts_cache[train_number] = (now, look)
     return look
 
 
@@ -297,11 +315,11 @@ def position_from_lts(train_number: str, lts: dict, now: datetime | None = None)
         at_station = False
         to_point = _pair(lts.get("travelling_to_lat_lng"))
         if to_point:
+            # ahead_distance is how far the train has run past the station it last reported ("8 kms ahead of X").
             ahead = _float(lts.get("ahead_distance")) or 0.0
-            seg = km(coords, to_point)
-            if seg > 0.1 and ahead >= 0:
-                t = min(0.9, max(0.0, 1.0 - (ahead / seg)))
-                coords = interpolate(coords, to_point, t)
+            span = _track_span(lts, upcoming_rows, ahead) or km(coords, to_point)
+            if span > 0.1 and ahead > 0:
+                coords = interpolate(coords, to_point, min(0.95, ahead / span))
     delay = lts.get("delay")
     try:
         delay_minutes = int(delay) if delay is not None and str(delay).strip() != "" else 0
@@ -349,6 +367,22 @@ def position_from_lts(train_number: str, lts: dict, now: datetime | None = None)
         run=run,
         covered_km=_covered_km(lts),
     )
+
+
+def _track_span(lts: dict, upcoming_rows: list, ahead: float) -> float | None:
+    """Track km from the last reported station to the next stop, when the feed gives both distances."""
+    covered = _covered_km(lts)
+    if covered is None:
+        return None
+    for row in upcoming_rows:
+        if not isinstance(row, dict) or not row.get("station_code"):
+            continue
+        dest = _float(row.get("distance_from_source"))
+        if dest is None:
+            return None
+        span = dest - (covered - ahead)
+        return span if span > 0.1 else None
+    return None
 
 
 def _coords(lts: dict) -> tuple[float, float] | None:
