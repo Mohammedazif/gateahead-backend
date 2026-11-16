@@ -130,3 +130,66 @@ def test_closed_gate_view_includes_the_train_during_the_barrier_lead_time(monkey
     gate_km, _ = along_route(body["rail"], crossing.coords)
     assert gate_km > 4
     assert row["motion"]["valid_for_sec"] > row["eta_min"] * 60
+
+
+def _parallel_tracks():
+    # A nearby way appears first in the map response; it must not win over
+    # the continuation whose endpoint actually meets this track.
+    return [
+        [(12.00, 75), (12.01, 75)],
+        [(12.01, 75.00015), (12.02, 75.00015)],
+        [(12.01, 75), (12.02, 75)],
+        [(12.00, 75.00015), (12.01, 75.00015)],
+    ]
+
+
+@pytest.mark.parametrize("variant", ["original", "reordered", "reversed_ways"])
+def test_parallel_tracks_stay_separate_without_returning_along_the_neighbour(variant):
+    rails = _parallel_tracks()
+    if variant == "reordered":
+        rails.reverse()
+    elif variant == "reversed_ways":
+        rails = [list(reversed(line)) if index % 2 == 0 else line for index, line in enumerate(rails)]
+    for lon in (75, 75.00015):
+        for lat in (12.005, 12.015):
+            chain = stitch_rail(rails, (lat, lon), half_km=15)
+            assert chain is not None
+            assert all(abs(point[1] - lon) < 1e-8 for point in chain)
+            steps = [after[0] - before[0] for before, after in zip(chain, chain[1:])]
+            assert all(step > 0 for step in steps) or all(step < 0 for step in steps)
+
+
+def test_a_straight_gap_can_be_joined_but_a_lateral_jump_to_a_parallel_track_cannot():
+    straight = stitch_rail([[(12, 75), (12.01, 75)], [(12.0101, 75), (12.02, 75)]], (12.005, 75), half_km=15)
+    assert straight[-1] == (12.02, 75)
+    separate = stitch_rail([[(12, 75), (12.01, 75)], [(12.01, 75.00015), (12.02, 75.00015)]], (12.005, 75), half_km=15)
+    assert separate[-1] == (12.01, 75)
+
+
+@pytest.mark.parametrize("reverse_ways", [False, True])
+def test_one_service_keeps_its_geographic_direction_between_neighbouring_gates(monkeypatch, reverse_ways):
+    from gateahead.timetable import Call
+
+    monkeypatch.setattr("gateahead.scene.crossing_call", lambda *args: Call(0.5, None, "timetable", 0))
+    train = TrainPosition("16512", 12, 75, "AAA", "CCC", False, 0, "northbound", datetime.now())
+    rails = _parallel_tracks()
+    if reverse_ways:
+        rails = [list(reversed(line)) if index % 2 == 0 else line for index, line in enumerate(rails)]
+    for lat in (12.005, 12.015):
+        body = build_scene(Crossing(str(lat), "Gate", lat, 75, "osm"), rails, [train], {"AAA": (12, 75), "CCC": (12.02, 75)}, load_settings())
+        assert [row["number"] for row in body["trains"]] == ["16512"]
+        row = body["trains"][0]
+        assert row["motion"]["direction"] * (body["rail"][-1][0] - body["rail"][0][0]) > 0
+
+
+def test_two_opposing_services_retain_distinct_identities_and_directions(monkeypatch):
+    from gateahead.timetable import Call
+
+    monkeypatch.setattr("gateahead.scene.crossing_call", lambda *args: Call(0.5, None, "timetable", 0))
+    north = TrainPosition("16512", 12, 75, "AAA", "CCC", False, 0, "northbound", datetime.now())
+    south = TrainPosition("16511", 12.02, 75.00015, "CCC", "AAA", False, 0, "southbound", north.as_of)
+    body = build_scene(Crossing("g", "Gate", 12.015, 75, "osm"), _parallel_tracks(), [north, south], {"AAA": (12, 75), "CCC": (12.02, 75)}, load_settings())
+    assert {row["number"] for row in body["trains"]} == {"16512", "16511"}
+    for row in body["trains"]:
+        world = row["motion"]["direction"] * (body["rail"][-1][0] - body["rail"][0][0])
+        assert (world > 0) == (row["number"] == "16512")

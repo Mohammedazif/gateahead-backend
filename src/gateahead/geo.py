@@ -124,26 +124,52 @@ def _grow(
     used: set[int],
     at_end: bool,
 ) -> None:
-    grew = True
-    while grew:
-        grew = False
+    while True:
         tip = chain[-1] if at_end else chain[0]
+        inward = reversed(chain[:-1]) if at_end else iter(chain[1:])
+        inside = next((point for point in inward if km(point, tip) > 1e-6), None)
+        outward = _unit_heading(inside, tip) if inside is not None else None
+        candidates = []
         for index, line in enumerate(rails):
             if index in used or len(line) < 2:
                 continue
-            if km(tip, line[0]) <= _JOIN_KM:
-                extra = list(line[1:]) if at_end else list(reversed(line[1:]))
-            elif km(tip, line[-1]) <= _JOIN_KM:
-                extra = list(reversed(line[:-1])) if at_end else list(line[:-1])
-            else:
-                continue
-            if at_end:
-                chain.extend(extra)
-            else:
-                chain[:0] = extra
-            used.add(index)
-            grew = True
-            break
+            for reverse in (False, True):
+                start = line[-1] if reverse else line[0]
+                gap = km(tip, start)
+                if gap > _JOIN_KM:
+                    continue
+                steps = list(reversed(line[:-1])) if reverse else line[1:]
+                next_point = next((point for point in steps if km(point, start) > 1e-6), None)
+                heading = _unit_heading(start, next_point) if next_point is not None else None
+                if heading is None:
+                    continue
+                alignment = _dot(*outward, *heading) if outward is not None else 1.0
+                # Nearby parallel tracks are separate lines, not a U-turn at a seam.
+                if alignment < -0.25:
+                    continue
+                if gap > 0.003 and outward is not None:
+                    gap_heading = _unit_heading(tip, start)
+                    forward = _dot(*outward, *gap_heading)
+                    lateral = gap * math.sqrt(max(0, 1 - forward * forward))
+                    if forward < 0 or lateral > 0.003:
+                        continue
+                candidates.append((gap, -alignment, index, start, steps))
+        if not candidates:
+            return
+        _gap, _turn, index, start, steps = min(candidates, key=lambda item: item[:3])
+        extra = ([start] if km(tip, start) > 1e-6 else []) + list(steps)
+        if at_end:
+            chain.extend(extra)
+        else:
+            chain[:0] = reversed(extra)
+        used.add(index)
+
+
+def _unit_heading(start: tuple[float, float], end: tuple[float, float]) -> tuple[float, float] | None:
+    east = (end[1] - start[1]) * math.cos(math.radians((start[0] + end[0]) / 2))
+    north = end[0] - start[0]
+    length = math.hypot(east, north)
+    return (east / length, north / length) if length > 1e-12 else None
 
 
 def _clip(
