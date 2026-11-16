@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import time
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import aiohttp
 
-from gateahead.geo import distance_to_polyline, km
+from gateahead.geo import km
 from gateahead.models import Crossing, Station
+from gateahead.crossing_roads import road_crossings
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OVERPASS_URLS = (
@@ -33,6 +34,7 @@ class OsmAround:
     rails: list[list[tuple[float, float]]]
     has_highway: bool
     error: str | None = None
+    excluded_crossing_ids: set[str] = field(default_factory=set)
 
 
 def _around_query(lat: float, lon: float, radius_m: float) -> str:
@@ -43,6 +45,11 @@ def _around_query(lat: float, lon: float, radius_m: float) -> str:
     (
       node["railway"="level_crossing"](around:{r},{lat},{lon});
       node["railway"="crossing"](around:{r},{lat},{lon});
+    )->.crossings;
+    (
+      .crossings;
+      way(bn.crossings)["highway"];
+      way(bn.crossings)["railway"];
       node["railway"="halt"](around:60000,{lat},{lon});
       node["railway"="station"](around:60000,{lat},{lon});
       way["railway"="station"](around:60000,{lat},{lon});
@@ -61,7 +68,6 @@ def parse_overpass(payload: dict, origin: tuple[float, float]) -> tuple[list[Cro
     crossings: list[Crossing] = []
     stations: list[Station] = []
     rails: list[list[tuple[float, float]]] = []
-    roads: list[tuple[str, list[tuple[float, float]]]] = []
     has_highway = False
     for el in elements:
         if not isinstance(el, dict):
@@ -70,7 +76,7 @@ def parse_overpass(payload: dict, origin: tuple[float, float]) -> tuple[list[Cro
             raise ValueError("Map provider returned invalid tags")
         tags = el.get("tags") or {}
         if any(tags.get(key) is not None and not isinstance(tags[key], str)
-               for key in ("railway", "highway", "ref", "name", "name:en")):
+               for key in ("railway", "highway", "ref", "name", "name:en", "access", "vehicle", "motor_vehicle")):
             raise ValueError("Map provider returned invalid tags")
         kind = el.get("type")
         railway = tags.get("railway", "")
@@ -112,42 +118,10 @@ def parse_overpass(payload: dict, origin: tuple[float, float]) -> tuple[list[Cro
                 rails.append(line)
         elif kind == "way" and tags.get("highway"):
             has_highway = True
-            label = tags.get("name") or tags.get("ref") or ""
-            line = _geom_points(el.get("geometry"))
-            if label and len(line) >= 2:
-                roads.append((label, line))
-    if roads:
-        named = []
-        for crossing in crossings:
-            road = _nearest_road(crossing.coords, roads)
-            named.append(
-                Crossing(
-                    id=crossing.id,
-                    name=crossing.name if crossing.name != "Level crossing" else (road or crossing.name),
-                    lat=crossing.lat,
-                    lon=crossing.lon,
-                    source=crossing.source,
-                    osm_id=crossing.osm_id,
-                    road=road,
-                )
-            )
-        crossings = named
+    crossings = road_crossings(crossings, elements)
     crossings.sort(key=lambda c: km(origin, c.coords))
     stations.sort(key=lambda s: km(origin, s.coords))
     return crossings, stations, rails, has_highway
-
-
-def _nearest_road(
-    point: tuple[float, float], roads: list[tuple[str, list[tuple[float, float]]]]
-) -> str:
-    best = ""
-    best_d = 0.08
-    for label, line in roads:
-        d = distance_to_polyline(point, line)
-        if d < best_d:
-            best_d = d
-            best = label
-    return best
 
 
 def _element_coords(el: dict) -> tuple[float, float] | None:
@@ -232,7 +206,13 @@ class OsmClient:
             except ValueError:
                 last_error = "map_unavailable"
                 continue
-            result = OsmAround(crossings, stations, rails, has_highway)
+            candidates = {f"osm:node:{el.get('id')}" for el in payload["elements"]
+                          if el.get("type") == "node"
+                          and (el.get("tags") or {}).get("railway") in {"level_crossing", "crossing"}
+                          and _element_coords(el) is not None}
+            excluded = candidates - {c.id for c in crossings}
+            result = OsmAround(crossings, stations, rails, has_highway,
+                               excluded_crossing_ids=excluded)
             _cache[key] = (now, result)
             return result
         if cached:

@@ -8,7 +8,7 @@ from math import cos, hypot, radians
 
 import aiohttp
 
-from gateahead.clusters import cluster_crossings
+from gateahead.clusters import cluster_crossings, gate_label
 from gateahead.clock import INDIA
 from gateahead.config import Settings
 from gateahead.erail import TrainRows, known_train_names, station_rows, train_rows
@@ -63,10 +63,14 @@ class TrainDiscovery(list[str]):
         self.unavailable = unavailable
 
 
-def merge_saved_crossings(osm: list[Crossing], saved: list[Crossing]) -> list[Crossing]:
+def merge_saved_crossings(
+    osm: list[Crossing], saved: list[Crossing], excluded_ids: set[str] | None = None,
+) -> list[Crossing]:
     merged = list(osm)
     known = {crossing.id for crossing in osm}
     for extra in saved:
+        if extra.source != "user" and excluded_ids and (extra.id in excluded_ids or extra.osm_id in excluded_ids):
+            continue
         if extra.id in known:
             continue
         if extra.source != "user" and _same_gate(extra, osm):
@@ -93,34 +97,31 @@ class GateAhead:
 
     async def map_around(self, lat: float, lon: float) -> OsmAround:
         result = await self.osm.around(lat, lon, self.settings.nearby_radius_m)
+        if not result.error:
+            self.store.reconcile_crossing_access({c.id for c in result.crossings}, result.excluded_crossing_ids)
         saved = self.store.crossings_near(lat, lon, self.settings.nearby_radius_m)
         if result.error:
             if not saved:
                 return result
             return OsmAround(saved, [], [], False)
-        crossings = merge_saved_crossings(result.crossings, saved)
+        crossings = merge_saved_crossings(result.crossings, saved, result.excluded_crossing_ids)
         stations = list(result.stations)
         if stations:
             tagged = []
             for crossing in crossings:
                 nearest = min(stations, key=lambda s: km(crossing.coords, s.coords))
                 tagged.append(
-                    Crossing(
-                        id=crossing.id,
-                        name=crossing.name,
-                        lat=crossing.lat,
-                        lon=crossing.lon,
-                        source=crossing.source,
-                        status=crossing.status,
-                        nearest_station=nearest.code,
-                        osm_id=crossing.osm_id,
-                        road=crossing.road,
-                        area=nearest.name,
-                    )
+                    replace(crossing, nearest_station=nearest.code, area=nearest.name)
                 )
             crossings = tagged
+        group_names = {}
+        for crossing in sorted(crossings, key=lambda c: c.id):
+            if crossing.group_id:
+                group_names.setdefault(crossing.group_id, gate_label(crossing))
+        crossings = [replace(c, group_name=group_names[c.group_id]) if c.group_id else c for c in crossings]
         _remember_osm(self.store, stations)
-        return OsmAround(crossings, stations, result.rails, result.has_highway)
+        return OsmAround(crossings, stations, result.rails, result.has_highway,
+                         excluded_crossing_ids=result.excluded_crossing_ids)
 
     def set_location(self, user_id: int, lat: float, lon: float) -> User:
         return self.store.set_location(user_id, lat, lon)

@@ -192,7 +192,9 @@ async def gates(
         return {"error": error, "gates": []}
     return {
         "gates": [
-            {"id": c.id, "name": gate_label(c), "lat": c.lat, "lon": c.lon, "km": round(d, 3), "source": c.source}
+            {"id": c.id, "name": gate_label(c), "lat": c.lat, "lon": c.lon, "km": round(d, 3), "source": c.source,
+             "road": c.road, "area": c.area, "group_id": c.group_id,
+             "group_name": c.group_name, "group_size": c.group_size}
             for c, d in items
         ]
     }

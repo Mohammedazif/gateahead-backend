@@ -226,6 +226,28 @@ class Store:
         ).fetchall()
         return [_crossing(row) for row in rows]
 
+    def reconcile_crossing_access(self, public_ids: set[str], excluded_ids: set[str]) -> None:
+        """Remember exact OSM access evidence without changing user pins.
+
+        Restricted rows stay hidden during map outages and process restarts.
+        Only this reversible status is restored by later public map evidence;
+        moderation rejections remain intact.
+        """
+        self._conn.executemany(
+            """UPDATE crossings SET status='restricted'
+               WHERE source != 'user' AND status IN ('public', 'pending')
+                 AND (id=? OR osm_id=?)""",
+            [(key, key) for key in excluded_ids],
+        )
+        self._conn.executemany(
+            """UPDATE crossings SET status='public'
+               WHERE source != 'user' AND status='restricted'
+                 AND (id=? OR osm_id=?)""",
+            [(key, key) for key in public_ids],
+        )
+        if public_ids or excluded_ids:
+            self._conn.commit()
+
     def crossings_near(self, lat: float, lon: float, radius_m: float) -> list[Crossing]:
         radius_km = max(0.0, radius_m) / 1000.0
         dlat = radius_km / 111.0

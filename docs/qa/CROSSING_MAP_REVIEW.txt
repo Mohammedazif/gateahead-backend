@@ -1,0 +1,83 @@
+GateAhead crossing identification and grouping review — 16–17 November 2026
+
+Scope: reproduce the Peelamedu/FCI and Payyanur screenshots, correct public
+vehicle crossing eligibility, identify individual markers on hover, and group
+parallel-track points in web/mobile lists without merging their predictions.
+Three agents handled backend, web, and mobile; parent reviewed integration,
+ran regression checks, and exercised the refreshed local API in Chromium.
+
+Findings and fixes
+
+- The reproduced FCI fixture contains 26 explicitly private crossing nodes.
+  Access tags and directly connected roads now exclude those nodes. Public
+  residential roads across railway spurs remain eligible; a nearby yard alone
+  is never a reason to remove a public road crossing. Explicit vehicle bans
+  and pedestrian-only connections are excluded from public vehicle results.
+- Road topology now supplies optional group_id, group_name, and group_size.
+  Groups stop at junctions, remain within 80 metres along the road, and cannot
+  join two crossings on the same mapped rail way. Names/proximity alone do
+  not establish a group. Four reproduced Payyanur track pairs form four groups.
+- Existing stored OSM restrictions survive provider outages and restarts.
+  Fresh positive evidence can restore an access-restricted record. Moderation
+  rejections and unrelated user pins retain their previous status.
+- Hover identifies the actual gate, road/area when available, distance, group
+  membership, and individual timing/uncertainty. Labels use literal DOM text.
+  Escape dismisses hover regardless of focus; theme changes do not duplicate it.
+- Nearby and train lists group explicit road crossings, with expandable member
+  checks. Original gate IDs, saved selections, per-track estimates, and dated
+  train run identities remain separate. Missing checks are not invented.
+- A browser test exposed a map loading race: an old empty-gate load callback
+  could overwrite newer data. Delayed callbacks now use current state and
+  remove stale listeners. The API-before-map-load scenario is reproducible.
+- Mobile simulation exposed navigation overflow at 320px with 1.4x text.
+  Tabs now wrap. Web member IDs and timing columns also wrap on phone screens.
+
+Verification
+
+- 419 Python tests passed, including backend workflow/simulator tests.
+- 103 web unit/component tests passed; production TypeScript/Vite build passed.
+- 113 Flutter tests passed; analyzer clean; Linux debug build passed.
+- Total: 635 automated tests.
+- Existing browser regression: 5 crossing workflows, 40 user journeys,
+  and 48 paired condition cases passed.
+- Production service-worker/offline checks passed all 5 cases.
+- Targeted browser suite passed all 3 profiles: normal desktop,
+  API-before-style-load desktop, and phone. It checks real-pointer hover/click,
+  literal malicious labels, Escape/theme
+  changes, exact member save/selection, wrapping, independent daily runs,
+  mixed uncertainty, and offline cached identities/timestamps.
+- Live expanded 10km Peelamedu query: 84 candidates, 29 public vehicle nodes,
+  55 excluded nodes, 6 groups, 46 stations, and 240 rail segments; 25.1 seconds.
+- Refreshed local API/browser sample: 31 raw nodes including stored records,
+  25 physical crossing rows, 6 groups, zero known private FCI IDs, successful
+  real-pointer identification, and no uncaught browser errors. Tile background
+  was controlled for this integration screenshot; crossing API data was live.
+- Both real OSM fixtures also retained identical filtering/group identities
+  across 50 shuffled element orders each.
+
+Evidence
+
+Checked-in reproductions: tests/fixtures/osm_{peelamedu,payyanur}_crossings.json
+Python: /tmp/gateahead-crossings-backend-final.log
+Web: /tmp/gateahead-crossings-web-final-tests.log
+Web release: /tmp/gateahead-crossings-web-release-build.log
+Browser regression: /tmp/gateahead-crossings-browser-regression/results.json
+Targeted browser: /tmp/gateahead-browser-gate-groups-final/results.json
+Targeted log: /tmp/gateahead-groups-final-assertions.log
+Final crossing regression: /tmp/gateahead-browser-crossings-final/results.json
+Offline: /tmp/gateahead-crossings-offline/results.json
+Native build: /tmp/gateahead-crossings-linux-build.log
+Expanded query: /tmp/gateahead-expanded-query-summary.json
+Live API/browser: /tmp/gateahead-crossings-live-browser.json
+Live screenshot: /tmp/gateahead-crossings-live-peelamedu.png
+
+The local API was restarted with its existing arguments/environment to activate
+the changes; the website remains on port 5173. Provider/worker health is separate
+from map classification. No claim is made that a healthy provider validates
+crossing access, physical barriers, or complete train coverage.
+
+Grouping requires mapped road connectivity. Legacy/ambiguous records remain
+separate until evidence supports grouping. Tests cover the scenarios above,
+not every possible location/device. Physical Android/iOS hardware and other
+browser engines were not exercised in this follow-up. Existing Python lifecycle,
+web bundle-size, and native build warnings remain non-failing.

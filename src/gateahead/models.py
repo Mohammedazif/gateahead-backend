@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
-CrossingStatus = Literal["pending", "public", "rejected"]
+CrossingStatus = Literal["pending", "public", "rejected", "restricted"]
 Direction = Literal["southbound", "northbound", "unknown"]
 PinVerdict = Literal["existing", "candidate", "reject"]
 
@@ -21,6 +21,9 @@ class Crossing:
     osm_id: str = ""
     road: str = ""
     area: str = ""
+    group_id: str = ""
+    group_name: str = ""
+    group_size: int = 1
 
     @property
     def coords(self) -> tuple[float, float]:
