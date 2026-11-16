@@ -39,6 +39,8 @@ Live train responses are cached for 90 seconds in SQLite, preserving their fetch
 
 Rail fragments use the closest forward connection and reject turnbacks or lateral jumps onto neighbouring parallel tracks. A train keeps its identity and travel direction across crossing views. Track placement is estimated because the source does not supply confirmed occupied-track assignments.
 
+Crossing scenes retain every identified service and expand the view for all trains in the estimated closure window. A scene train may include `track` with `estimated: true`, its own `rail`, `along_km`, `position_on_segment`, and `motion`. That path comes from the nearby connected rail only when it reaches the crossing corridor. The original top-level geometry and per-train fields remain available to existing clients. These projections add no provider requests.
+
 Train names from existing discovery and live payloads are retained in SQLite and applied to timetable-only positions, without additional provider requests. A live name takes precedence; when no official name is available, the route endpoints provide a description instead.
 
 `GET /reports?crossing_id=...` returns recent, unverified community observations. `POST /reports` accepts `crossing_id`, `installation_id`, `state` (`open`, `closed`, or `wrong_location`), `lat`, and `lon`. Submissions are checked against the mapped crossing, replace that installation's previous observation for the same gate, and expire after ten minutes. Installation identifiers are hashed and excluded from responses. Reports do not alter predictions or train alerts.

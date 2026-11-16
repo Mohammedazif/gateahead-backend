@@ -193,3 +193,21 @@ def test_two_opposing_services_retain_distinct_identities_and_directions(monkeyp
     for row in body["trains"]:
         world = row["motion"]["direction"] * (body["rail"][-1][0] - body["rail"][0][0])
         assert (world > 0) == (row["number"] == "16512")
+        track = row["track"]
+        assert track["estimated"] is True
+        expected_lon = 75 if row["number"] == "16512" else 75.00015
+        assert all(abs(point[1] - expected_lon) < 1e-8 for point in track["rail"])
+        assert (track["motion"]["direction"] * (track["rail"][-1][0] - track["rail"][0][0]) > 0) == (row["number"] == "16512")
+
+
+def test_scene_includes_the_second_approaching_train_even_when_the_first_is_already_near(monkeypatch):
+    from gateahead.timetable import Call
+
+    monkeypatch.setattr("gateahead.scene.crossing_call", lambda position, *args: Call(0.5 if position.train_number == "16512" else 4, None, "timetable", 0))
+    north = TrainPosition("16512", 11.995, 75, "AAA", "CCC", False, 0, "northbound", datetime.now())
+    south = TrainPosition("16511", 12.036, 75, "CCC", "AAA", False, 0, "southbound", north.as_of)
+    rails = [[(11.9, 75), (12, 75), (12.1, 75)]]
+    body = build_scene(Crossing("g", "Gate", 12, 75, "osm"), rails, [north, south], {"AAA": (11.9, 75), "CCC": (12.1, 75)}, load_settings())
+    assert len(body["trains"]) == 2
+    assert all(row["position_on_segment"] for row in body["trains"])
+    assert along_route(body["rail"], (12, 75))[0] > 4

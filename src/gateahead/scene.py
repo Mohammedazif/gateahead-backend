@@ -69,18 +69,34 @@ def build_scene(
     # A barrier can close five minutes before arrival. Include that approach
     # instead of hiding a fresh moving train just outside a 1.5 km view.
     half_km = _DRAW_KM
-    if trains and trains[0]["status"] == "closed" and trains[0].get("motion"):
-        lead = trains[0]
-        approach_km = max(0, lead["eta_min"]) * lead["motion"]["speed_kmh"] / 60
-        half_km = max(half_km, min(BEND_HALF_KM, approach_km + 0.35))
+    for row in trains:
+        if row["status"] == "closed" and row.get("motion"):
+            approach_km = abs(row["eta_min"]) * row["motion"]["speed_kmh"] / 60
+            half_km = max(half_km, min(BEND_HALF_KM, approach_km + 0.35))
     drawn = stitch_rail(rails, crossing.coords, half_km=half_km)
     if not drawn:
         return body
     positions_by_number = {position.train_number: position for position in positions}
     for row in trains:
-        along, offset = along_route(drawn, positions_by_number[row["number"]].coords)
+        position = positions_by_number[row["number"]]
+        along, offset = along_route(drawn, position.coords)
         row["along_km"] = round(along, 3)
         row["position_on_segment"] = offset <= 0.15
+        if row.get("motion") and abs(row["eta_min"]) <= settings.closing_soon_eta_min:
+            candidate = stitch_rail(rails, position.coords, half_km=BEND_HALF_KM)
+            # Use a train's nearby connected line only when it reaches this
+            # crossing corridor. This remains an estimate, not track occupancy.
+            if candidate and along_route(candidate, crossing.coords)[1] <= 0.04:
+                track_rail = stitch_rail([candidate], crossing.coords, half_km=half_km)
+                stops = (routes or {}).get(position.train_number) or []
+                motion = _motion(position, candidate, stations, stops, settings)
+                if track_rail and motion:
+                    track_along, track_off = along_route(track_rail, position.coords)
+                    row["track"] = {
+                        "estimated": True, "rail": [[lat, lon] for lat, lon in track_rail],
+                        "along_km": round(track_along, 3), "position_on_segment": track_off <= 0.15,
+                        "motion": motion,
+                    }
     body["available"] = True
     body["rail"] = [[lat, lon] for lat, lon in drawn]
     body["trains"] = trains
