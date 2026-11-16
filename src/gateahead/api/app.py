@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 import aiohttp
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from gateahead.cities import search_cities
@@ -58,7 +58,20 @@ async def shutdown() -> None:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"ok": True}
+    return {"ok": True, "database_id": _store.meta("database_id"), "providers": _store.provider_status(),
+            "worker": _store.worker_status(), "worker_required": os.getenv("GATEAHEAD_WORKER_REQUIRED") == "1"}
+
+
+@app.get("/ready")
+async def ready(response: Response) -> dict:
+    status = _store.catalog_status(_settings.route_max_age_hours)
+    checks = {"worker": status["worker"]["state"] in {"healthy", "partial"},
+              "stations": status["stations"] > 0, "fresh_routes": status["fresh_routes"] > 0,
+              "route_geometry": status["fresh_routes_with_geometry"] > 0}
+    ok = all(checks.values())
+    response.status_code = 200 if ok else 503
+    return {"ok": ok, "database_id": status["database_id"], "checks": checks,
+            "worker": status["worker"], "national_coverage_verified": False}
 
 
 @app.get("/coverage")

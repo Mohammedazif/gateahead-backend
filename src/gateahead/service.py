@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, replace
-from datetime import datetime
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime
 from math import cos, hypot, radians
 
 import aiohttp
@@ -23,6 +23,7 @@ from gateahead.predict import JUST_PASSED_MIN, closes_in
 from gateahead.scene import build_scene
 from gateahead.store import Store
 from gateahead.snapshots import SnapshotCache
+from gateahead.runs import RunRequest, requests_for
 from gateahead.timetable import (
     BEND_HALF_KM,
     classify_passage,
@@ -50,6 +51,7 @@ class PositionBatch:
     positions: list[TrainPosition]
     routes: dict[str, SavedRoute]
     coverage: dict
+    service_updates: list[dict] = field(default_factory=list)
 
     def __iter__(self):
         return iter((self.numbers, self.positions, self.routes))
@@ -192,6 +194,7 @@ class GateAhead:
             {number: route.stops for number, route in routes.items()},
         )
         body["coverage"] = getattr(batch, "coverage", {"status": "unknown"})
+        body["service_updates"] = getattr(batch, "service_updates", [])
         return body
 
     async def _positions(
@@ -208,39 +211,48 @@ class GateAhead:
         numbers = list(dict.fromkeys(nearby_routes + numbers))
         self.store.remember_train_candidates(numbers)
         cached = self._cached_routes(numbers)
-        fresh_looks = {number: look for number in numbers
-                       if (look := cached_live(number, getattr(self, "snapshots", None))) is not None}
         self.store.remember_train_names(known_train_names(numbers))
-        hot: list[str] = []
-        cold: list[str] = []
+        requests: dict[str, RunRequest] = {}
+        hot, cold = [], []
+        looks = {}
         for number in numbers:
             route = cached.get(number)
-            # A current moving report takes precedence over schedule eligibility.
-            if route is None or (number in fresh_looks and fresh_looks[number].moving is not None):
-                hot.append(number)
-                continue
-            kind = classify_passage(route.stops, route.run_days, lat, lon, now)
-            if kind in {"hot", "unknown"}:
-                hot.append(number)
-            elif kind == "cold":
-                cold.append(number)
+            plan = requests_for(number, route, lat, lon, now, self.settings.max_delay_hours)
+            if not plan:
+                known = cached_live(number, getattr(self, "snapshots", None))
+                if known is not None and known.moving:
+                    plan = [RunRequest(number, date.fromisoformat(known.start_date) if known.start_date else None)]
+            for request in plan:
+                requests[request.key] = request
+                look = cached_live(number, getattr(self, "snapshots", None), request.start)
+                if request.cold and look is None:
+                    cold.append(request.key)
+                else:
+                    hot.append(request.key)
+                    if look is not None:
+                        looks[request.key] = replace(look, start_date=request.start.isoformat()) if request.start else look
         semaphore = asyncio.Semaphore(_FETCH)
 
-        async def one(number: str) -> tuple[str, LiveLook]:
+        async def one(key: str) -> tuple[str, LiveLook]:
+            request = requests[key]
             async with semaphore:
                 try:
-                    return number, await fetch_live(self.session, number, self.snapshots)
+                    look = await fetch_live(self.session, request.number, self.snapshots, request.start) if request.start else await fetch_live(self.session, request.number, self.snapshots)
+                    if request.start:
+                        look = replace(look, start_date=request.start.isoformat())
+                    self.store.record_provider("railyatri:live", look.operating_status != "unknown" and (look.moving is not None or look.finished or bool(look.notice)),
+                                               "journey_report_unavailable" if look.operating_status == "unknown" else "")
+                    return key, look
                 except (aiohttp.ClientError, TimeoutError, ValueError):
-                    _log.warning("Live report unavailable for %s", number, exc_info=True)
-                    return number, LiveLook(None, "", False)
+                    _log.warning("Live report unavailable for %s", key, exc_info=True)
+                    self.store.record_provider("railyatri:live", False, "network_or_invalid_response")
+                    return key, LiveLook(None, "", False, operating_status="unknown")
 
-        looks = {number: fresh_looks[number] for number in hot if number in fresh_looks}
         pending = [number for number in hot if number not in looks]
         check_times = self.store.live_check_times(pending)
 
         def priority(number: str) -> tuple[float, float]:
-            route = cached.get(number)
-            delta = passage_delta(route.stops, route.run_days, lat, lon, now) if route else None
+            delta = requests[number].delta
             return check_times.get(number, 0), abs(delta) if delta is not None else float("inf")
 
         pending.sort(key=priority)
@@ -251,26 +263,33 @@ class GateAhead:
             number
             for number in hot
             if number in looks and (looks[number].moving is not None or not looks[number].finished)
+            and looks[number].operating_status == "running"
         ]
-        routes = {number: cached[number] for number in cold if number in cached}
-        routes.update(await self._routes(wanted))
+        routes = {requests[key].number: cached[requests[key].number] for key in cold}
+        routes.update(await self._routes(list(dict.fromkeys(requests[key].number for key in wanted))))
         now = datetime.now(INDIA)
         positions = positions_from_looks(wanted, looks, routes, now)
-        for number in cold:
-            route = routes.get(number)
+        for key in cold:
+            request = requests[key]
+            route = routes.get(request.number)
             if route is None:
                 continue
-            placed = scheduled_position(number, route, lat, lon, now)
+            placed = scheduled_position(request.number, route, lat, lon, now, request.start)
             if placed is not None:
                 positions.append(placed)
         # Live names also help future timetable-only estimates after a restart.
         self.store.remember_train_names({position.train_number: position.name for position in positions if position.name.strip()})
         names = self.store.train_names(numbers)
         positions = [name_position(position, names.get(position.train_number, ""), routes.get(position.train_number)) for position in positions]
+        updates = [{"number": requests[key].number, "start_date": look.start_date,
+                    "run_id": f"{requests[key].number}:{look.start_date}" if look.start_date else key,
+                    "status": look.operating_status, "notice": look.notice} for key, look in looks.items()
+                   if look.operating_status in {"cancelled", "diverted", "partially_cancelled"}]
         return PositionBatch(numbers, positions, routes, {
             "status": "partial",
             "national_coverage_verified": False,
             "candidates": len(numbers),
+            "run_candidates": len(requests),
             "live_candidates": len(hot),
             "live_checked": len(looks),
             "live_reports": sum(look.moving is not None for look in looks.values()),
@@ -280,7 +299,7 @@ class GateAhead:
             "missing_or_stale_routes": sum(number not in cached and number not in routes for number in numbers),
             "scheduled_candidates": len(cold),
             "limited": len(pending) > len(selected),
-        })
+        }, updates)
 
     async def predict_here(self, lat: float, lon: float) -> dict:
         mapped = await self.map_around(lat, lon)
@@ -345,6 +364,7 @@ class GateAhead:
                     if _cluster_is_shown(status, cluster.id in focus):
                         gate_predictions.append({
                             "id": crossing.id, "train": position.train_number, "name": position.name,
+                            "run_id": position.run_id, "start_date": position.start_date,
                             "eta": round(call.eta, 1), "closes_in": round(closes_in(call.eta, self.settings), 1),
                             "status": status, "basis": call.source, "age_min": round(position.age_minutes, 1),
                             "at_station": standing(position),
@@ -390,6 +410,7 @@ class GateAhead:
                 just_passed.append(
                     {
                         "train": position.train_number,
+                        "run_id": position.run_id, "start_date": position.start_date,
                         "name": position.name,
                         "cluster": cluster.name,
                         "ago": round(ago, 1),
@@ -414,6 +435,7 @@ class GateAhead:
             "awaiting_update": awaiting,
             "sightings": sightings,
             "coverage": getattr(batch, "coverage", {"status": "unknown"}),
+            "service_updates": getattr(batch, "service_updates", []),
         }
 
     async def _discover_trains(self, stations: list[Station]) -> list[str]:
@@ -512,16 +534,18 @@ def _cluster_is_shown(status: str, in_focus: bool) -> bool:
 def resolve_position(
     number: str, look: LiveLook, route: SavedRoute | None, now: datetime
 ) -> TrainPosition | None:
+    if look.operating_status != "running":
+        return None
     if look.moving:
         position = position_from_lts(number, look.moving, now)
         if position is not None and look.fetched_at is not None:
             # A cached provider report gets older; reopening a gate must not reset its ETA.
             elapsed = max(0, now.timestamp() - look.fetched_at) / 60
             position = replace(position, age_minutes=position.age_minutes + elapsed)
-        return position
+        return replace(position, start_date=look.start_date or position.start_date) if position is not None else None
     if look.finished or route is None:
         return None
-    return waiting_position(number, route, now)
+    return waiting_position(number, route, now, date.fromisoformat(look.start_date) if look.start_date else None)
 
 
 def positions_from_looks(
@@ -532,10 +556,11 @@ def positions_from_looks(
 ) -> list[TrainPosition]:
     found: list[TrainPosition] = []
     for number in numbers:
+        service_number = number.split(":", 1)[0]
         position = resolve_position(
-            number,
+            service_number,
             looks.get(number, LiveLook(None, "", False)),
-            routes.get(number),
+            routes.get(service_number),
             now,
         )
         if position is not None:
@@ -732,7 +757,7 @@ def _sighting(position: TrainPosition, eta: float | None, passed_local: bool) ->
 
 
 def _run_fields(position: TrainPosition) -> dict:
-    fields: dict = {"delay": position.delay_minutes}
+    fields: dict = {"delay": position.delay_minutes, "run_id": position.run_id, "start_date": position.start_date}
     if position.origin_name:
         fields["origin"] = position.origin_name
     if position.dest_name:

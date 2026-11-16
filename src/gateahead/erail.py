@@ -14,9 +14,12 @@ _HEADERS = {
 class TrainRows(list[tuple[str, int | None]]):
     """Preserve list compatibility while distinguishing an unavailable lookup."""
 
-    def __init__(self, rows=(), *, unavailable: bool = False):
+    def __init__(self, rows=(), *, unavailable: bool = False, source: str = "erail", error: str = "", attempts=()):
         super().__init__(rows)
         self.unavailable = unavailable
+        self.source = source
+        self.error = error
+        self.attempts = list(attempts)
 
 
 def parse_train_rows(body: str) -> list[tuple[str, int | None]]:
@@ -97,6 +100,55 @@ def parse_station_board(html: str) -> tuple[list[tuple[str, int | None]], dict[s
     return rows, names
 
 
+class _StationTable(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tables, self.table, self.row, self.cell = [], None, None, None
+        self.title, self.in_title = "", False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "h1": self.in_title = True
+        if tag == "table": self.table = []
+        if tag == "tr" and self.table is not None: self.row = []
+        if tag in {"td", "th"} and self.row is not None: self.cell = []
+
+    def handle_data(self, data):
+        if self.in_title: self.title += data
+        if self.cell is not None: self.cell.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "h1": self.in_title = False
+        if tag in {"td", "th"} and self.cell is not None:
+            self.row.append(" ".join(" ".join(self.cell).split()))
+            self.cell = None
+        if tag == "tr" and self.row is not None:
+            self.table.append(self.row)
+            self.row = None
+        if tag == "table" and self.table is not None:
+            self.tables.append(self.table)
+            self.table = None
+
+
+def parse_railyatri_board(html: str, code: str) -> tuple[list[tuple[str, int | None]], dict[str, str]]:
+    parser = _StationTable()
+    parser.feed(html)
+    if not re.search(r"\(" + re.escape(code) + r"\)", parser.title, re.I):
+        return [], {}
+    rows, names = [], {}
+    for table in parser.tables:
+        if not table or not any("depart" in cell.lower() for cell in table[0]):
+            continue
+        headers = [cell.lower() for cell in table[0]]
+        departure = next(i for i, cell in enumerate(headers) if "depart" in cell)
+        for cells in table[1:]:
+            number = re.search(r"\b(\d{5})\b", cells[0]) if cells else None
+            if not number or number[1] in names or departure >= len(cells):
+                continue
+            names[number[1]] = re.sub(r"\s*\(?" + number[1] + r"\)?\s*", " ", cells[0]).strip()
+            rows.append((number[1], _clock_minutes(cells[departure])))
+    return rows, names
+
+
 def _clock_minutes(value: str) -> int | None:
     text = value.strip().replace(".", ":")
     pieces = text.split(":")
@@ -128,21 +180,31 @@ async def station_rows(session: aiohttp.ClientSession, code: str, name: str, *, 
         return hit[1]
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or code.lower()
     station = f"{slug}-{code}"
-    url = f"https://erail.in/trains-between-stations/{station}/{station}"
-    try:
-        async with session.get(url, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=20)) as response:
-            if response.status != 200:
-                return TrainRows(unavailable=True)
-            rows, names = parse_station_board(await response.text())
-    except (aiohttp.ClientError, TimeoutError, ValueError):
-        return TrainRows(unavailable=True)
-    # A changed/unavailable HTML layout must not become a cached empty board.
-    if rows:
-        _cache[key] = (time.monotonic(), rows)
-        _names.update(names)
-    # Without parseable departures, the page may still be loading or its
-    # schema may have changed. It cannot establish an empty railway line.
-    return rows if rows else TrainRows(unavailable=True)
+    attempts = []
+    providers = [("erail", f"https://erail.in/trains-between-stations/{station}/{station}"),
+                 ("railyatri", f"https://www.railyatri.in/stations/{slug}-{code.lower()}")]
+    for provider, url in providers:
+        error = ""
+        try:
+            async with session.get(url, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                if response.status != 200:
+                    error = f"http_{response.status}"
+                else:
+                    html = await response.text()
+                    rows, names = parse_station_board(html) if provider == "erail" else parse_railyatri_board(html, code)
+                    if rows:
+                        attempts.append((provider, ""))
+                        found = TrainRows(rows, source=provider, attempts=attempts)
+                        _cache[key] = (time.monotonic(), found)
+                        _names.update(names)
+                        return found
+                    error = "unparseable_board"
+        except TimeoutError:
+            error = "timeout"
+        except (aiohttp.ClientError, ValueError):
+            error = "network_or_invalid_response"
+        attempts.append((provider, error))
+    return TrainRows(unavailable=True, error="; ".join(f"{p}:{e}" for p, e in attempts), attempts=attempts)
 
 
 async def train_rows(

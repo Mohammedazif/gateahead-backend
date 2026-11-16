@@ -25,14 +25,17 @@ async def poll_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
         for row in scan.get("approaching") or []:
             if row["status"] not in {"closed", "closing_soon"}:
                 continue
-            grouped.setdefault(row["train"], []).append(row)
-        for number, rows in grouped.items():
+            grouped.setdefault(row.get("run_id") or row["train"], []).append(row)
+        for run_id, rows in grouped.items():
             rows = sorted(rows, key=lambda r: r["eta"])
+            number = rows[0]["train"]
             if not service.store.should_alert(
-                user.user_id, "near", number, service.settings.alert_cooldown_min
+                user.user_id, "near", run_id, service.settings.alert_cooldown_min
             ):
                 continue
             head = f"Train {number} {rows[0]['name']}"
+            if rows[0].get("start_date"):
+                head += f" (started {rows[0]['start_date']})"
             lines = [head, "Closing near you:"]
             for row in rows[:6]:
                 eta = gate_label(row["eta"], row.get("closes_in"))
@@ -47,6 +50,6 @@ async def poll_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
                     text="\n".join(lines),
                     disable_web_page_preview=True,
                 )
-                service.store.mark_alert(user.user_id, "near", number)
+                service.store.mark_alert(user.user_id, "near", run_id)
             except Exception:
                 logger.exception("failed to send alert to %s", user.user_id)

@@ -122,11 +122,14 @@ def simulated(trains: list[SimTrain], feeds: dict[str, Feed], *, cache_live: boo
     clock = _Clock()
     by_number = {train.number: train for train in trains}
 
-    async def fake_live(_session, number: str, _cache=None) -> LiveLook:
+    async def fake_live(_session, number: str, _cache=None, start=None) -> LiveLook:
+        if start is not None and start != DAY.date():
+            return LiveLook(None, "", True, start_date=start.isoformat())
         train = by_number.get(number)
         if train is None:
             return LiveLook(None, "", False)
         today = live_payload(train, clock.minute, feeds.get(number, Feed()), DAY)
+        today["train_start_date"] = DAY.date().isoformat()
         clock.reports[number] = (clock.minute, today)
         return classify_live(today, None)
 
@@ -155,10 +158,15 @@ def simulated(trains: list[SimTrain], feeds: dict[str, Feed], *, cache_live: boo
     service.fetch_timetable = fake_timetable  # type: ignore[assignment]
     service.train_rows = fake_rows  # type: ignore[assignment]
     service.station_rows = fake_station_rows  # type: ignore[assignment]
-    cache_saved = (live._fetch_live_data, live.time, snapshots.time)
+    cache_saved = (live._fetch_live_data, live.fetch_run, live.time, snapshots.time)
     if cache_live:
         async def fake_live_data(session, number):
             return await fake_live(session, number)
+
+        async def fake_run(session, number, start):
+            if start != DAY.date():
+                return LiveLook(None, "", True, start_date=start.isoformat())
+            return await live._fetch_live_data(session, number)
 
         simulated_time = SimpleNamespace(
             time=lambda: (DAY + timedelta(minutes=clock.minute)).timestamp(),
@@ -166,6 +174,7 @@ def simulated(trains: list[SimTrain], feeds: dict[str, Feed], *, cache_live: boo
         )
         service.fetch_live = live.fetch_live
         live._fetch_live_data = fake_live_data
+        live.fetch_run = fake_run
         live.time = simulated_time
         snapshots.time = simulated_time
     with tempfile.TemporaryDirectory() as folder:
@@ -180,7 +189,7 @@ def simulated(trains: list[SimTrain], feeds: dict[str, Feed], *, cache_live: boo
         finally:
             for name, value in saved.items():
                 setattr(service, name, value)
-            live._fetch_live_data, live.time, snapshots.time = cache_saved
+            live._fetch_live_data, live.fetch_run, live.time, snapshots.time = cache_saved
             app.snapshots.close()
             store._conn.close()
 

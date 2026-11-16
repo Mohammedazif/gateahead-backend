@@ -157,7 +157,7 @@ def test_live_budget_rotates_through_all_indexed_candidates(tmp_path, monkeypatc
     first = asyncio.run(service._positions([], 12.15, 75.2))
     assert first.numbers == numbers
     assert first.coverage["live_checked"] == 3
-    assert first.coverage["pending_live"] == 6
+    assert first.coverage["pending_live"] == first.coverage["live_candidates"] - 3
     assert first.coverage["limited"] is True
     asyncio.run(service._positions([], 12.15, 75.2))
     asyncio.run(service._positions([], 12.15, 75.2))

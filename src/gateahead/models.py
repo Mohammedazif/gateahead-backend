@@ -101,6 +101,11 @@ class TrainPosition:
     left_km: int | None = None
     run: str = ""
     covered_km: float | None = None
+    start_date: str = ""
+
+    @property
+    def run_id(self) -> str:
+        return f"{self.train_number}:{self.start_date}" if self.start_date else self.train_number
 
     @property
     def coords(self) -> tuple[float, float]:

@@ -29,6 +29,8 @@ async def sync_catalog(
     station_refresh_hours: float = 168,
     route_refresh_hours: float = 24,
     request_interval: float = 2,
+    station_codes: list[str] | None = None,
+    train_numbers: list[str] | None = None,
 ) -> dict:
     """Keep progress in SQLite; a failed fetch never replaces a saved route."""
     owner = uuid.uuid4().hex
@@ -46,15 +48,23 @@ async def sync_catalog(
         if not store.claim_catalog(owner):
             raise RuntimeError("catalog_lease_lost")
         last_request = time.monotonic()
+        store.meta_set("train_catalog_heartbeat", str(time.time()))
 
     try:
+        store.meta_set("train_catalog_heartbeat", str(time.time()))
         failures = 0
-        for station in store.due_stations(station_limit, station_refresh_hours):
+        stations = ([store.halt(code) for code in dict.fromkeys(station_codes)] if station_codes is not None
+                    else store.due_stations(station_limit, station_refresh_hours))
+        if any(station is None for station in stations):
+            raise ValueError("Target station is not in the installed catalog")
+        for station in stations[:station_limit]:
             await pace()
             rows = await station_rows(session, station.code, station.name, refresh=True)
             # Empty HTML is indistinguishable from a changed provider layout.
             # Keep this station due, with backoff, rather than calling it covered.
-            store.record_station_scan(station.code, bool(rows))
+            store.record_station_scan(station.code, bool(rows), getattr(rows, "error", "empty_or_unreadable_board" if not rows else ""), getattr(rows, "source", ""))
+            for provider, error in getattr(rows, "attempts", []):
+                store.record_provider(f"{provider}:board", not error, error)
             if rows:
                 numbers = [number for number, _clock in rows]
                 store.remember_train_candidates(numbers, "station-board")
@@ -67,9 +77,12 @@ async def sync_catalog(
             if failures >= 3:
                 break
         failures = 0
-        for number in store.due_routes(route_limit, route_refresh_hours):
+        numbers = (list(dict.fromkeys(train_numbers)) if train_numbers is not None
+                   else store.due_routes(route_limit, route_refresh_hours))
+        for number in numbers[:route_limit]:
             await pace()
             stops, run_days = await fetch_timetable(session, number)
+            store.record_provider("railyatri:timetable", len(stops) >= 2, "unavailable_or_unparseable" if len(stops) < 2 else "")
             if len(stops) >= 2:
                 stops = locate_stops(stops, store.halt_coords([s.code for s in stops if s.lat is None or s.lon is None]))
                 store.save_route(number, stops, run_days)
@@ -83,7 +96,10 @@ async def sync_catalog(
                 break
         if result["station_errors"] or result["route_errors"]:
             result["status"] = "partial"
-        store.meta_set("train_catalog_last_sync", json.dumps({**result, "at": time.time()}))
+        summary = json.dumps({**result, "at": time.time()})
+        store.meta_set("train_catalog_last_sync", summary)
+        if result["stations_checked"] or result["routes_refreshed"]:
+            store.meta_set("train_catalog_last_success", summary)
         return result
     finally:
         store.release_catalog(owner)
@@ -91,7 +107,7 @@ async def sync_catalog(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("status", "sync", "audit"))
+    parser.add_argument("action", choices=("status", "sync", "audit", "check"))
     parser.add_argument("--output", type=Path, help="CSV destination for a station coverage audit")
     parser.add_argument("--station-limit", type=int, default=25)
     parser.add_argument("--route-limit", type=int, default=100)
@@ -102,6 +118,8 @@ def main() -> None:
     parser.add_argument("--interval-seconds", type=float, default=60)
     parser.add_argument("--trains", type=Path, help="Seed train numbers from a UTF-8 file, one five-digit number per line")
     parser.add_argument("--stations", type=Path, help="Import station GeoJSON or a station JSON array before discovery")
+    parser.add_argument("--station", action="append", help="Check this installed station code, bypassing refresh/backoff; repeat for more")
+    parser.add_argument("--train", action="append", help="Check this five-digit train number, bypassing refresh/backoff; repeat for more")
     args = parser.parse_args()
     if min(args.station_limit, args.route_limit, args.route_refresh_hours, args.station_refresh_hours) < 0:
         parser.error("limits and refresh hours must be nonnegative")
@@ -109,6 +127,19 @@ def main() -> None:
         parser.error("request interval must be at least 0.5s and watch interval at least 1s")
     settings = load_settings()
     store = Store(settings.db_path)
+    if args.station:
+        args.station = [code.strip().upper() for code in args.station]
+        if any(not re.fullmatch(r"[A-Z0-9]{1,6}", code) for code in args.station):
+            parser.error("target station codes must contain one to six letters/digits")
+    if args.train and any(not re.fullmatch(r"\d{5}", number) for number in args.train):
+        parser.error("target train numbers must contain exactly five digits")
+    if args.watch and (args.station or args.train):
+        parser.error("targeted checks are one-shot; omit --watch")
+    if args.action == "check":
+        status = store.worker_status()
+        print(json.dumps({"database_id": store.meta("database_id"), "worker": status}), flush=True)
+        store._conn.close()
+        raise SystemExit(0 if status["state"] in {"healthy", "partial"} else 1)
     if args.action == "audit":
         if not args.output:
             parser.error("audit requires --output")
@@ -131,7 +162,7 @@ def main() -> None:
             parser.error("station file contains no valid stations")
         store.upsert_halts(halts)
     if args.action == "status":
-        print(json.dumps(store.catalog_status(settings.route_max_age_hours)), flush=True)
+        print(json.dumps({"database": str(store.path), **store.catalog_status(settings.route_max_age_hours)}), flush=True)
         store._conn.close()
         return
 
@@ -139,14 +170,19 @@ def main() -> None:
         async with aiohttp.ClientSession() as session:
             if not store.halt_count():
                 await ensure_catalog(session, store)
+            if args.station and any(store.halt(code) is None for code in args.station):
+                parser.error("target station is not in the installed catalog; import it with --stations first")
             while True:
                 result = await sync_catalog(
                     session, store, station_limit=args.station_limit, route_limit=args.route_limit,
                     route_refresh_hours=args.route_refresh_hours, station_refresh_hours=args.station_refresh_hours,
                     request_interval=args.request_interval,
+                    station_codes=args.station, train_numbers=args.train,
                 )
                 print(json.dumps({"sync": result, "catalog": store.catalog_status(settings.route_max_age_hours)}), flush=True)
                 if not args.watch:
+                    if result["status"] != "ok":
+                        raise SystemExit(2 if result["status"] == "busy" else 1)
                     break
                 await asyncio.sleep(args.interval_seconds)
 

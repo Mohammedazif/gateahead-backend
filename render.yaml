@@ -1,0 +1,22 @@
+# For the separately versioned gateahead-backend repository.
+# Review the paid service/disk settings before applying to the existing service.
+services:
+  - type: web
+    name: gateahead-api
+    runtime: docker
+    plan: starter
+    numInstances: 1
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    disk:
+      name: gateahead-data
+      mountPath: /var/lib/gateahead
+      sizeGB: 1
+    envVars:
+      - key: GATEAHEAD_DATA
+        value: /var/lib/gateahead
+      - key: GATEAHEAD_ENABLE_BOT
+        value: "false"
+      - key: WEB_ORIGIN
+        sync: false

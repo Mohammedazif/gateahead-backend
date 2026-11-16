@@ -53,6 +53,7 @@ def build_scene(
         bracket = chosen.bracket
         row = {
             "number": position.train_number,
+            "run_id": position.run_id, "start_date": position.start_date,
             "name": position.name,
             "eta_min": round(eta, 1),
             "closes_in_min": round(closes_in(eta, settings), 1),
@@ -82,9 +83,9 @@ def build_scene(
     drawn = stitch_rail(rails, crossing.coords, half_km=half_km)
     if not drawn:
         return body
-    positions_by_number = {position.train_number: position for position in positions}
+    positions_by_number = {position.run_id: position for position in positions}
     for row in trains:
-        position = positions_by_number[row["number"]]
+        position = positions_by_number[row["run_id"]]
         along, offset = along_route(drawn, position.coords)
         row["along_km"] = round(along, 3)
         row["position_on_segment"] = offset <= 0.15
@@ -113,7 +114,8 @@ def build_scene(
 def _note_passed(gone: list[dict], position: TrainPosition, ago: float | None) -> None:
     if ago is None or ago > JUST_PASSED_MIN:
         return
-    gone.append({"number": position.train_number, "name": position.name, "ago_min": round(ago, 1)})
+    gone.append({"number": position.train_number, "run_id": position.run_id, "start_date": position.start_date,
+                 "name": position.name, "ago_min": round(ago, 1)})
 
 
 def _motion(

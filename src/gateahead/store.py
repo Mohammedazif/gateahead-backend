@@ -5,6 +5,7 @@ import math
 import re
 import sqlite3
 import time
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -16,8 +17,9 @@ class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
-        self._conn = sqlite3.connect(path)
+        self._conn = sqlite3.connect(path, timeout=30)
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._init()
 
     def _init(self) -> None:
@@ -104,6 +106,11 @@ class Store:
               owner TEXT NOT NULL,
               expires REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS provider_health (
+              provider TEXT PRIMARY KEY, checks INTEGER NOT NULL DEFAULT 0, successes INTEGER NOT NULL DEFAULT 0,
+              consecutive_failures INTEGER NOT NULL DEFAULT 0, last_attempt REAL, last_success REAL, last_error TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS run_checks (run_id TEXT PRIMARY KEY, checked_at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS route_segments (
               id INTEGER PRIMARY KEY,
               train_number TEXT NOT NULL,
@@ -122,6 +129,11 @@ class Store:
         columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(train_routes)")}
         if "run_days" not in columns:
             self._conn.execute("ALTER TABLE train_routes ADD COLUMN run_days TEXT NOT NULL DEFAULT ''")
+        scan_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(station_scans)")}
+        for column in ("last_error", "source"):
+            if column not in scan_columns:
+                self._conn.execute(f"ALTER TABLE station_scans ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
+        self._conn.execute("INSERT OR IGNORE INTO meta VALUES ('database_id',?)", (uuid.uuid4().hex,))
         self._conn.execute(
             "INSERT OR IGNORE INTO train_catalog (train_number, discovered_at, source) "
             "SELECT train_number, ?, 'cache' FROM train_routes", (time.time(),),
@@ -408,7 +420,7 @@ class Store:
         ).fetchall()
         return {row["train_number"]: row["name"] for row in rows}
 
-    def save_route(self, number: str, stops: list[RouteStop], run_days: str = "") -> None:
+    def save_route(self, number: str, stops: list[RouteStop], run_days: str = "", *, fetched_at: str | None = None) -> None:
         if len(stops) < 2:
             raise ValueError("A route needs at least two points")
         with self._conn:
@@ -423,7 +435,7 @@ class Store:
                 "INSERT INTO train_routes (train_number, fetched_at, run_days) VALUES (?, ?, ?) "
                 "ON CONFLICT(train_number) DO UPDATE SET fetched_at=excluded.fetched_at, "
                 "run_days=CASE WHEN excluded.run_days='' THEN train_routes.run_days ELSE excluded.run_days END",
-                (number, datetime.now().isoformat(timespec="seconds"), run_days or ""),
+                (number, fetched_at or datetime.now().isoformat(timespec="seconds"), run_days or ""),
             )
             self._conn.execute(
                 "INSERT INTO train_catalog (train_number, discovered_at, source) VALUES (?, ?, 'timetable') "
@@ -493,14 +505,16 @@ class Store:
         rows = self._conn.execute(
             "SELECT h.* FROM halts h LEFT JOIN station_scans s ON s.code=h.code "
             "WHERE (s.checked_at IS NULL OR s.checked_at < ?) AND COALESCE(s.retry_after,0) <= ? "
-            "ORDER BY COALESCE(s.checked_at,0), h.code LIMIT ?",
+            "ORDER BY COALESCE(s.checked_at,0), (s.code IS NOT NULL), "
+            "EXISTS(SELECT 1 FROM train_stops t WHERE t.code=h.code) DESC, h.code LIMIT ?",
             (time.time() - refresh_hours * 3600, time.time(), limit),
         ).fetchall()
         return [_halt(row) for row in rows]
 
-    def record_station_scan(self, code: str, success: bool) -> None:
+    def record_station_scan(self, code: str, success: bool, error: str = "", source: str = "") -> None:
         with self._conn:
             self._conn.execute("INSERT OR IGNORE INTO station_scans (code) VALUES (?)", (code,))
+            self._conn.execute("UPDATE station_scans SET last_error=?, source=? WHERE code=?", (error, source, code))
             if success:
                 self._conn.execute(
                     "UPDATE station_scans SET checked_at=?, retry_after=0, failures=0 WHERE code=?", (time.time(), code),
@@ -541,6 +555,8 @@ class Store:
                 f"SELECT train_number, live_checked_at FROM train_catalog WHERE train_number IN ({slots})", batch,
             ):
                 found[row[0]] = row[1]
+            for row in self._conn.execute(f"SELECT run_id, checked_at FROM run_checks WHERE run_id IN ({slots})", batch):
+                found[row[0]] = row[1]
         return found
 
     def record_live_checks(self, numbers: list[str]) -> None:
@@ -548,6 +564,8 @@ class Store:
             self._conn.executemany(
                 "UPDATE train_catalog SET live_checked_at=? WHERE train_number=?", [(time.time(), n) for n in numbers],
             )
+            self._conn.executemany("INSERT INTO run_checks VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET checked_at=excluded.checked_at",
+                                   [(n, time.time()) for n in numbers])
 
     def claim_catalog(self, owner: str) -> bool:
         with self._conn:
@@ -561,6 +579,22 @@ class Store:
         with self._conn:
             self._conn.execute("DELETE FROM catalog_lock WHERE owner=?", (owner,))
 
+    def record_provider(self, provider: str, success: bool, error: str = "") -> None:
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO provider_health (provider,checks,successes,consecutive_failures,last_attempt,last_success,last_error) "
+                "VALUES (?,1,?,?,?, ?,?) ON CONFLICT(provider) DO UPDATE SET checks=checks+1, "
+                "successes=successes+excluded.successes, consecutive_failures=CASE WHEN excluded.successes=1 THEN 0 ELSE consecutive_failures+1 END, "
+                "last_attempt=excluded.last_attempt, last_success=COALESCE(excluded.last_success,last_success), last_error=excluded.last_error",
+                (provider, int(success), int(not success), time.time(), time.time() if success else None, error[:300]),
+            )
+
+    def provider_status(self) -> list[dict]:
+        return [{**dict(row), "state": "unavailable" if row["last_success"] is None else
+                 "failing" if row["consecutive_failures"] else
+                 "stale" if time.time() - row["last_success"] > 6 * 3600 else "healthy"}
+                for row in self._conn.execute("SELECT * FROM provider_health ORDER BY provider")]
+
     def catalog_status(self, max_age_hours: float = 168) -> dict:
         cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat(timespec="seconds")
         row = self._conn.execute(
@@ -570,6 +604,7 @@ class Store:
             "FROM train_catalog c LEFT JOIN train_routes r USING(train_number)", (cutoff,),
         ).fetchone()
         found = dict(row)
+        found["database_id"] = self.meta("database_id")
         found["stale_routes"] = found["routes"] - found["fresh_routes"]
         found["missing_routes"] = found["known_trains"] - found["routes"]
         daily_cutoff = (datetime.now() - timedelta(hours=24)).isoformat(timespec="seconds")
@@ -587,7 +622,14 @@ class Store:
             "SELECT COUNT(*) FROM train_routes r WHERE NOT EXISTS "
             "(SELECT 1 FROM route_segments s WHERE s.train_number=r.train_number)",
         ).fetchone()[0]
+        found["fresh_routes_with_geometry"] = self._conn.execute(
+            "SELECT COUNT(*) FROM train_routes r WHERE r.fetched_at>=? AND EXISTS "
+            "(SELECT 1 FROM route_segments s WHERE s.train_number=r.train_number)", (cutoff,),
+        ).fetchone()[0]
         found["last_sync"] = json.loads(self.meta("train_catalog_last_sync") or "null")
+        found["last_successful_sync"] = json.loads(self.meta("train_catalog_last_success") or "null")
+        found["worker"] = self.worker_status()
+        found["providers"] = self.provider_status()
         times = self._conn.execute("SELECT MIN(fetched_at), MAX(fetched_at) FROM train_routes").fetchone()
         found["oldest_route_check"] = times[0]
         found["newest_route_check"] = times[1]
@@ -596,6 +638,16 @@ class Store:
         found["route_max_age_hours"] = max_age_hours
         found["national_coverage_verified"] = False
         return found
+
+    def worker_status(self) -> dict:
+        last_success = (json.loads(self.meta("train_catalog_last_success") or "null") or {}).get("at")
+        last_sync = json.loads(self.meta("train_catalog_last_sync") or "null") or {}
+        heartbeat = float(self.meta("train_catalog_heartbeat") or 0) or None
+        return {"heartbeat_at": heartbeat, "last_success_at": last_success,
+                "state": "never_refreshed" if last_success is None else
+                "stalled" if heartbeat is None or time.time() - heartbeat > 300 else
+                "stale" if time.time() - last_success > 36 * 3600 else
+                "partial" if last_sync.get("status") == "partial" else "healthy"}
 
     def station_coverage(self, max_age_hours: float = 168):
         cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat(timespec="seconds")

@@ -52,7 +52,8 @@ def test_timetable_only_positions_receive_discovered_names_without_live_calls(tm
     service._cached_routes = lambda numbers: {"16630": _route()}
     service._routes = AsyncMock(return_value={})
     monkeypatch.setattr("gateahead.service.known_train_names", lambda numbers: {"16630": "MALABAR EXPRESS"})
-    monkeypatch.setattr("gateahead.service.classify_passage", lambda *args: "cold")
+    from gateahead.runs import RunRequest
+    monkeypatch.setattr("gateahead.service.requests_for", lambda *args: [RunRequest("16630", cold=True)])
     monkeypatch.setattr("gateahead.service.scheduled_position", lambda *args: _position())
     fetch_live = AsyncMock()
     monkeypatch.setattr("gateahead.service.fetch_live", fetch_live)

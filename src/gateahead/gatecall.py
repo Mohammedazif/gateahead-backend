@@ -86,6 +86,7 @@ def standing(position: TrainPosition) -> bool:
 def awaiting_report(position: TrainPosition, ids: list[str]) -> dict:
     return {
         "number": position.train_number, "name": position.name,
+        "run_id": position.run_id, "start_date": position.start_date,
         "current": position.current_name or position.last_station or "the station",
         "last_station": position.last_station, "age_min": round(position.age_minutes, 1),
         "reason": "stopped_report", "ids": ids,

@@ -85,13 +85,24 @@ def predict_text(scan: dict) -> str:
     approaching = scan.get("approaching") or []
     passed = scan.get("passed") or []
     awaiting = scan.get("awaiting_update") or []
-    gone = {row["train"] for row in passed}
+    def run_key(row):
+        return row.get("run_id") or f"{row.get('train') or row.get('number')}:{row.get('start_date', '')}"
+
+    def run_date(row):
+        return f" (started {h(row['start_date'])})" if row.get("start_date") else ""
+
+    gone = {run_key(row) for row in passed}
     sightings = [s for s in (scan.get("sightings") or []) if s.get("age", 0) < 45]
-    live = [s for s in sightings if not s.get("passed_local") and s["number"] not in gone]
+    live = [s for s in sightings if not s.get("passed_local") and run_key(s) not in gone]
     grouped: dict[str, list] = {}
     for row in approaching:
-        grouped.setdefault(row["train"], []).append(row)
+        grouped.setdefault(run_key(row), []).append(row)
     lines = ["<b>Live trains</b>"]
+    for update in scan.get("service_updates") or []:
+        state = {"cancelled": "Cancelled", "diverted": "Diverted", "partially_cancelled": "Partially cancelled"}.get(update.get("status"), "Update unavailable")
+        lines.append(f"• {h(update['number'])}{run_date(update)}: {state}.")
+        if update.get("status") != "cancelled":
+            lines.append("Crossing timing is unavailable until this journey’s route is confirmed.")
     coverage = scan.get("coverage") or {}
     pending = coverage.get("pending_live", 0)
     discovery_unavailable = coverage.get("unavailable_discovery", 0)
@@ -108,14 +119,14 @@ def predict_text(scan: dict) -> str:
     if awaiting:
         lines.append("<b>Position update needed</b>")
         for train in awaiting:
-            lines.append(f"• {h(train['number'])} {h(train.get('name') or '')}: last reported stopped at "
+            lines.append(f"• {h(train['number'])} {h(train.get('name') or '')}{run_date(train)}: last reported stopped at "
                          f"{h(train.get('current') or 'the station')}, {round(train.get('age_min', 0))} min old.")
         lines.append("Passage has not been confirmed. The barrier’s position is unknown.")
     if grouped:
         lines.append("")
-        for number, rows in grouped.items():
+        for rows in grouped.values():
             rows = sorted(rows, key=lambda r: r["eta"])
-            title = f"{h(number)} {h(rows[0]['name'])}".strip()
+            title = f"{h(rows[0]['train'])} {h(rows[0]['name'])}{run_date(rows[0])}".strip()
             lines.append(f"<b>{title}</b>")
             if rows[0].get("at_station"):
                 lines.append(f"At {h(rows[0].get('current') or 'the station')}")
@@ -133,6 +144,9 @@ def predict_text(scan: dict) -> str:
         lines.append("Other train estimates may be missing. The barrier’s position is unknown." if incomplete
                      else "No train is close enough to close a crossing near you right now.")
         lines.append("")
+    elif scan.get("service_updates"):
+        lines.append("No crossing estimates are available for these journeys. The barrier’s position is unknown.")
+        return "\n".join(lines)
     else:
         lines.append("No train estimates are available from the completed checks. The barrier’s position is unknown." if incomplete
                      else "No live trains reported on this stretch right now.")
@@ -140,7 +154,7 @@ def predict_text(scan: dict) -> str:
     if passed:
         lines.append("<b>Just passed</b>")
         for row in passed[:6]:
-            title = f"{h(row['train'])} {h(row.get('name') or '')}".strip()
+            title = f"{h(row['train'])} {h(row.get('name') or '')}{run_date(row)}".strip()
             lines.append(f"• {title} {passed_label(row['ago'])} at {h(row['cluster'])}")
         lines.append("")
     if live:
@@ -149,9 +163,9 @@ def predict_text(scan: dict) -> str:
             delay = f", {s['delay']} min late" if s.get("delay") else ""
             where = h(s.get("current") or "unknown")
             if s.get("age", 0) >= 8:
-                lines.append(f"• {h(s['number'])} {h(s['name'])}: last reported at {where}{delay}")
+                lines.append(f"• {h(s['number'])} {h(s['name'])}{run_date(s)}: last reported at {where}{delay}")
             else:
-                lines.append(f"• {h(s['number'])} {h(s['name'])}: at {where}{delay}")
+                lines.append(f"• {h(s['number'])} {h(s['name'])}{run_date(s)}: at {where}{delay}")
         lines.append("")
     lines.append("/nearby for map links.")
     return "\n".join(lines).rstrip()

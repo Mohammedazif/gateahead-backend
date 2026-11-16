@@ -24,6 +24,7 @@ dev = ["pytest>=8.0", "httpx>=0.27"]
 [project.scripts]
 gateahead-bot = "gateahead.bot.app:main"
 gateahead-catalog = "gateahead.catalog:main"
+gateahead-server = "gateahead.runtime:main"
 
 [tool.setuptools.package-dir]
 "" = "src"

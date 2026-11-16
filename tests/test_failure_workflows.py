@@ -1,12 +1,14 @@
 """Paired successful/failing-provider workflows, without network requests."""
 
 import asyncio
+from datetime import datetime
 from dataclasses import replace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from gateahead.config import load_settings
+from gateahead.clock import INDIA
 from gateahead.live import LiveLook
 from gateahead.models import Crossing, Station
 from gateahead.osm import OsmAround, OsmClient, parse_overpass
@@ -237,7 +239,7 @@ def test_discovery_http_failure_is_not_a_valid_empty_response(kind, status, monk
 
     class Session:
         def __init__(self):
-            self.responses = iter([broken, healthy])
+            self.responses = iter([broken, broken, healthy] if kind == "board" else [broken, healthy])
 
         def get(self, *args, **kwargs):
             return next(self.responses)
@@ -293,7 +295,8 @@ def test_indexed_route_remains_visible_when_provider_discovery_is_down(tmp_path,
     monkeypatch.setattr("gateahead.service.station_rows", AsyncMock(return_value=TrainRows(unavailable=True)))
     monkeypatch.setattr("gateahead.service.train_rows", AsyncMock(return_value=TrainRows(unavailable=True)))
     monkeypatch.setattr("gateahead.service.classify_passage", lambda *args: "hot")
-    monkeypatch.setattr("gateahead.service.cached_live", lambda *args: look)
+    monkeypatch.setattr("gateahead.service.cached_live", lambda number, cache=None, start=None:
+                        look if start is None or start == datetime.now(INDIA).date() else LiveLook(None, "", True))
     fetch = AsyncMock()
     monkeypatch.setattr("gateahead.service.fetch_live", fetch)
     try:

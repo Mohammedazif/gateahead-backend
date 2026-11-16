@@ -6,7 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+_PROJECT_ROOT = next((parent for parent in Path(__file__).resolve().parents if (parent / "pyproject.toml").exists()), Path.cwd())
+load_dotenv(_PROJECT_ROOT / ".env")
 
 
 def database_path(data_dir: Path) -> Path:
@@ -22,18 +23,15 @@ def database_path(data_dir: Path) -> Path:
 
 
 def find_data_dir() -> Path:
+    root = _PROJECT_ROOT
     env = os.getenv("GATEAHEAD_DATA")
     if env:
-        return Path(env)
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        candidate = parent / "data"
-        if candidate.is_dir() or (parent / "pyproject.toml").exists():
-            candidate.mkdir(parents=True, exist_ok=True)
-            return candidate
-    path = Path.cwd() / "data"
+        path = Path(env).expanduser()
+        path = path if path.is_absolute() else root / path
+    else:
+        path = root / "data"
     path.mkdir(parents=True, exist_ok=True)
-    return path
+    return path.resolve()
 
 
 @dataclass(frozen=True)
@@ -53,6 +51,7 @@ class Settings:
     log_level: str
     live_check_budget: int = 30
     route_max_age_hours: float = 168
+    max_delay_hours: float = 48
 
     @property
     def db_path(self) -> Path:
@@ -77,4 +76,5 @@ def load_settings() -> Settings:
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         live_check_budget=max(1, int(os.getenv("LIVE_CHECK_BUDGET", "30"))),
         route_max_age_hours=max(1, float(os.getenv("ROUTE_MAX_AGE_HOURS", "168"))),
+        max_delay_hours=min(168, max(6, float(os.getenv("MAX_DELAY_HOURS", "48")))),
     )

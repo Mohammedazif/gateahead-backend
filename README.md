@@ -78,6 +78,73 @@ Use `--trains /path/train-numbers.txt` to seed five-digit numbers, or `--station
 
 `GET /coverage` reads only the database. It reports known trains, fresh/stale/missing routes, routes due for daily refresh, failed refreshes, scan counts, route geometry gaps, and oldest/newest successful route check times. Check times describe provider retrieval, not a verified timetable edition. The CSV audit includes every installed station and its route/board coverage; route counts are based on explicit timetable points and do not count inferred passage between distant stops. Neither output independently verifies the completeness of the upstream service list, OSM crossings, freight coverage, diversions, or physical barriers. `national_coverage_verified` remains false.
 
+## Persistent services and refresh monitoring
+
+All entry points resolve `.env` and a relative `GATEAHEAD_DATA` against this backend project, independent of the launch directory. The default is `backend/data/gateahead.db`. For production, set an absolute path on persistent storage. API, Telegram bot and catalog worker must use the same file on the same host. SQLite WAL and a 30-second writer timeout allow their connections to share users, routes, snapshots, discovery progress and refresh leases. Do not put this SQLite file on a network filesystem or give separate containers separate copies.
+
+`compose.yaml` supplies one named volume mounted into all services. Create `.env` from `.env.example`, then:
+
+```bash
+docker compose up -d --build api worker
+# Enable this profile only when the Telegram bot is wanted and its token is configured:
+docker compose --profile telegram up -d bot
+docker compose ps
+docker compose logs --tail 50 worker
+```
+
+The volume survives container replacement. Back it up before changes; `docker compose down -v` deletes the volume. To import this checkout's existing database before first startup:
+
+```bash
+docker compose build
+docker compose run --rm -v "$(pwd)/data:/import:ro" worker python -m gateahead.database /import/gateahead.db
+```
+
+For previous installs that wrote to `src/gateahead/data/gateahead.db`, consolidate it into the selected persistent database with:
+
+```bash
+python -m gateahead.database src/gateahead/data/gateahead.db
+```
+
+This takes consistent SQLite backups of both databases under `data/backups/`, imports the newer complete route and newer timestamped user/scan records, keeps destination values for untimestamped conflicts, and rebuilds imported route geometry. It preserves retrieval timestamps and leaves the source in place. Restart existing API, bot and worker processes after changing the selected path, so no process continues writing to the old file.
+
+Station discovery now tries eRail and falls back to a RailYatri station table that explicitly identifies the requested code. Board departure times and leading-zero train numbers are preserved. Failed requests, unreadable layouts and wrong station pages remain retryable failures instead of empty successful boards. Previously untouched stations with known route points are tried before repeatedly failing stations. Board candidates still need a usable timetable before route-based predictions can be made.
+
+`GET /health` includes a durable `database_id`, provider health and worker state; compare the ID with `python -m gateahead.catalog status` to detect split stores. `GET /coverage` also reports the last completed batch and the last batch that actually refreshed a board or timetable. Failed or idle batches never advance the successful refresh timestamp. Provider counters retain attempts, successes, consecutive failures, last error and last successful retrieval. A successful fallback does not hide the primary provider's failure.
+
+`python -m gateahead.catalog check` exits nonzero when there has never been a successful refresh, the worker heartbeat is over five minutes old, or no successful refresh has occurred for 36 hours. A partial batch with recent progress remains usable and is reported as `partial`. Compose runs this check for the worker every minute. Keep the worker in watch mode with its default one-minute interval; inspect provider counters and the coverage audit when health is degraded. No successful refresh means the catalog is not considered healthy even if the process is alive.
+
+## Existing Render service
+
+Render disks belong to a single service instance ([disk documentation](https://render.com/docs/disks)). Keep the API and catalog worker in the existing `gateahead-api` service so they can share SQLite. `python -m gateahead.runtime` starts both processes, sets the same absolute data directory for each, honours Render's `PORT`, and stops the instance if a required child exits. The platform can then restart the complete service. SIGTERM stops the children, with a bounded hard-stop for stuck processes.
+
+The Docker image now uses this runtime by default. Native Python services can use `pip install .` as the build command and `python -m gateahead.runtime` as the start command. `python -m gateahead.runtime --check-config` validates storage and lists planned services without starting them or revealing the Telegram token. To run the bot in that same instance, configure `TELEGRAM_BOT_TOKEN` and explicitly set `GATEAHEAD_ENABLE_BOT=true`; leave it false for API and worker only. Stop any separate bot using the same token before enabling this one.
+
+`render.yaml` is a proposed configuration for this separately versioned backend repository. It specifies one service instance, a paid `starter` plan and a 1 GB persistent disk at `/var/lib/gateahead`; review these settings against the existing service before applying. Updating the existing service retains its public URL. Creating a different service can require changing the frontend proxy. Mount the disk and set `GATEAHEAD_DATA` to that mount before launching the runtime. Import an existing database using `python -m gateahead.database /path/to/source.db` on the service when the source is available there. The consolidated local database is not embedded in the Docker image.
+
+After deployment, run these commands from Render's service shell:
+
+```bash
+python -m gateahead.runtime --check-config
+python -m gateahead.catalog status
+# One-shot upstream verification: these explicit targets bypass refresh/backoff.
+python -m gateahead.catalog sync --station PAY --train 16650 --station-limit 1 --route-limit 1
+python -m gateahead.catalog check
+```
+
+The target station must already be in the installed station catalog. A target check uses the normal discovery and timetable parsers, writes successful data and failures to the shared database, and does not change retry policy for unrelated entries. One-shot refreshes exit nonzero when a batch is partial or already leased; watch mode keeps running through normal partial batches and honours backoff. Targeted checks cannot be combined with watch mode.
+
+`GET /health` remains process liveness for Render's `healthCheckPath`. `GET /ready` returns HTTP 503 until the worker has recent successful progress, station data, fresh routes and route geometry; it returns 200 when those checks pass. Use `/ready` for an external data-pipeline monitor, and inspect `/coverage` for gaps. Readiness does not mean nationwide coverage is complete. Keeping liveness separate lets the API serve retained data during provider outages while readiness reports the missing refresh.
+
+## Journey dates and operating exceptions
+
+Train identity is `run_id`, formed from the train number and its origin departure date (`start_date`, ISO date in India time). List, scene, passed and unresolved rows retain both fields. Date-specific shared live caches and alert cooldowns prevent one day's run replacing another. Clients group, focus and reconcile trains by this identity while displaying the real train number and origin date. Legacy undated rows remain readable.
+
+For each geographically matching timetable, live candidates include every scheduled origin date whose passage at the crossing falls between `MAX_DELAY_HOURS` ago and eight hours ahead. The default delay lookback is 48 hours, configurable from 6 to 168. Multi-day routes use the original departure date and operating weekdays. Runs more than 150 minutes ahead may use a timetable estimate until their live-check window. The live budget counts journey instances, and pending checks remain visible in coverage. This bounded lookback does not cover arbitrarily late trains.
+
+A dated provider report must echo the requested origin date. Missing or mismatched dates produce an unavailable report with no normal timetable fallback. A confirmed cancellation removes that journey's prediction; diversions and partial cancellations also suppress normal-route timing until an authoritative changed route is available. `service_updates` carries `number`, `run_id`, `start_date`, `status` and `notice`, separately from approaching trains. Browser, phone and Telegram views show these updates without inventing closure times. A simultaneously running older journey remains eligible. Large delays alone do not cancel or finish a train, and stopped-train delay clocks use that journey's actual origin date.
+
+These changes recognize exceptions supplied by the provider. They cannot discover an unreported cancellation or supply a diverted route that the provider does not expose. Nationwide service coverage remains unverified.
+
 ## Gate timing
 
 `/predict` and `/scene` give two numbers for each train at a crossing:

@@ -92,6 +92,76 @@ def test_catalog_coverage_reads_no_upstream_data(feature_api, tmp_path, monkeypa
     asyncio.run(run())
 
 
+def test_health_exposes_shared_identity_and_refresh_failure_without_upstream_calls(feature_api, tmp_path, monkeypatch):
+    from gateahead.store import Store
+    api, service = feature_api
+    store = Store(tmp_path / "health.db")
+    store.record_provider("erail:board", False, "http_500")
+    monkeypatch.setattr(api, "_store", store)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://test") as client:
+            body = (await client.get("/health")).json()
+            assert body["database_id"] == store.catalog_status()["database_id"]
+            assert body["worker"]["state"] == "never_refreshed"
+            assert body["providers"][0]["last_error"] == "http_500"
+            assert service.prediction_calls == 0
+
+    try:
+        asyncio.run(run())
+    finally:
+        store._conn.close()
+
+
+def test_pipeline_readiness_requires_recent_progress_and_usable_routes(feature_api, tmp_path, monkeypatch):
+    import json
+    import time
+    from gateahead.models import Halt
+    from gateahead.store import Store
+    from gateahead.timetable import parse_route_rows
+    api, service = feature_api
+    store = Store(tmp_path / "readiness.db")
+    monkeypatch.setattr(api, "_store", store)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://test") as client:
+            missing = await client.get("/ready")
+            assert missing.status_code == 503
+            assert missing.json()["ok"] is False
+            store.upsert_halts([Halt("AAA", "South", 12, 75)])
+            store.save_route("16512", parse_route_rows([
+                {"station_code": "AAA", "distance_from_source": 0, "std_min": 600, "lat": 12, "lng": 75},
+                {"station_code": "BBB", "distance_from_source": 30, "sta_min": 630, "lat": 12.3, "lng": 75},
+            ]))
+            store.meta_set("train_catalog_last_success", json.dumps({"at": time.time()}))
+            store.meta_set("train_catalog_heartbeat", str(time.time()))
+            ready = await client.get("/ready")
+            assert ready.status_code == 200
+            assert ready.json()["database_id"] == store.meta("database_id")
+            assert ready.json()["national_coverage_verified"] is False
+            store.meta_set("train_catalog_heartbeat", str(time.time() - 301))
+            assert (await client.get("/ready")).status_code == 503
+            assert (await client.get("/health")).status_code == 200
+            store.meta_set("train_catalog_heartbeat", str(time.time()))
+            # A stale located route plus a fresh unlocated route is not usable route data.
+            store._conn.execute("UPDATE train_routes SET fetched_at='2020-01-01T00:00:00'")
+            store._conn.commit()
+            store.save_route("16513", parse_route_rows([
+                {"station_code": "XXX", "distance_from_source": 0, "std_min": 600},
+                {"station_code": "YYY", "distance_from_source": 30, "sta_min": 630},
+            ]))
+            unusable = await client.get("/ready")
+            assert unusable.status_code == 503
+            assert unusable.json()["checks"]["fresh_routes"] is True
+            assert unusable.json()["checks"]["route_geometry"] is False
+            assert service.prediction_calls == 0
+
+    try:
+        asyncio.run(run())
+    finally:
+        store._conn.close()
+
+
 @pytest.mark.parametrize("endpoint", ["/place", "/halts", "/gates", "/predict", "/scene"])
 @pytest.mark.parametrize("field,value", [
     ("lat", "91"), ("lat", "-91"), ("lon", "181"), ("lon", "-181"),

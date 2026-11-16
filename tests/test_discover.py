@@ -169,13 +169,14 @@ def test_empty_discovery_still_checks_a_train_passing_between_distant_stops(tmp_
     service._discover_trains = AsyncMock(return_value=[])
     service.session = None
     service.snapshots = None
-    fetch = AsyncMock(return_value=LiveLook({"success": True, "current_station_code": "SOUTH", "cur_stn_lat": 12,
-                                           "cur_stn_lng": 75.2, "status": "T", "status_as_of_min": 0}, "", False))
+    look = LiveLook({"success": True, "current_station_code": "SOUTH", "cur_stn_lat": 12,
+                     "cur_stn_lng": 75.2, "status": "T", "status_as_of_min": 0}, "", False)
+    fetch = AsyncMock(side_effect=lambda session, number, cache, start: look if start == Clock.now().date() else LiveLook(None, "", True))
     monkeypatch.setattr(service_module, "fetch_live", fetch)
     numbers, positions, _ = asyncio.run(service._positions([], 12.15, 75.2))
     assert numbers == ["16512"]
     assert [position.train_number for position in positions] == ["16512"]
-    fetch.assert_awaited_once()
+    assert len({call.args[3] for call in fetch.await_args_list}) == fetch.await_count
 
 
 def test_cached_payyanur_route_survives_an_empty_provider_discovery(tmp_path, monkeypatch):
@@ -208,12 +209,12 @@ def test_cached_payyanur_route_survives_an_empty_provider_discovery(tmp_path, mo
     service.snapshots = None
     look = LiveLook({"success": True, "current_station_code": "CAN", "cur_stn_lat": 11.868, "cur_stn_lng": 75.363,
                      "status": "T", "train_name": "CLT SBC EXPRESS", "status_as_of_min": 0}, "", False)
-    fetch = AsyncMock(return_value=look)
+    fetch = AsyncMock(side_effect=lambda session, number, cache, start: look if start == moment.date() else LiveLook(None, "", True))
     monkeypatch.setattr(service_module, "fetch_live", fetch)
     numbers, positions, _ = asyncio.run(service._positions([], 12.0919, 75.1948))
     assert numbers == ["16512"]
     assert [position.train_number for position in positions] == ["16512"]
-    fetch.assert_awaited_once()
+    assert len({call.args[3] for call in fetch.await_args_list}) == fetch.await_count
     # An old route or a route in a different region must not become a fallback candidate.
     assert service.store.route_numbers_near(20, 80, 10, 24 * 7) == []
     service.store._conn.execute("UPDATE train_routes SET fetched_at='2020-01-01T00:00:00'")

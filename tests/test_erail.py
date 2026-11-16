@@ -58,11 +58,12 @@ def test_station_boards_are_cached_and_also_supply_train_names():
 
 
 def test_a_failed_or_unreadable_board_is_not_cached_as_no_trains():
-    session = _Session([_Resp(500), _Resp(200, "<html>Loading...</html>"), _Resp(200, _BOARD)])
+    session = _Session([_Resp(500), _Resp(500), _Resp(200, "<html>Loading...</html>"),
+                        _Resp(200, "<html>Loading...</html>"), _Resp(200, _BOARD)])
     assert asyncio.run(erail.station_rows(session, "PAY", "Payyanur")) == []
     assert asyncio.run(erail.station_rows(session, "PAY", "Payyanur")) == []
     assert asyncio.run(erail.station_rows(session, "PAY", "Payyanur"))[0][0] == "16512"
-    assert session.calls == 3
+    assert session.calls == 5
 
 
 def test_failed_lookup_is_not_cached():

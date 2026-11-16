@@ -9,5 +9,7 @@ build/
 venv/
 node_modules/
 *.db
+*.db-wal
+*.db-shm
 data/*.db
 *.geojson

@@ -4,7 +4,7 @@ import json
 import math
 import re
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import aiohttp
 
@@ -123,7 +123,7 @@ def passage_delta(stops: list[RouteStop], run_days: str, lat: float, lon: float,
 
 
 def scheduled_position(
-    number: str, route: SavedRoute, lat: float, lon: float, now: datetime
+    number: str, route: SavedRoute, lat: float, lon: float, now: datetime, start: date | None = None
 ) -> TrainPosition | None:
     stops = route.stops
     if len(stops) < 2:
@@ -132,7 +132,8 @@ def scheduled_position(
     clock = clock_at(stops, gate_km, "move") if gate_km is not None else None
     if clock is None:
         clock = float(stops[0].depart_min)
-    found = _best_delta(clock, route.run_days, now)
+    frame = now.hour * 60 + now.minute + now.second / 60 + (now.date() - start).days * 1440 if start else None
+    found = (clock - frame, frame) if frame is not None else _best_delta(clock, route.run_days, now)
     if found is None:
         return None
     _delta, frame = found
@@ -157,6 +158,7 @@ def scheduled_position(
         covered_km=covered,
         origin_name=stops[0].name,
         dest_name=stops[-1].name,
+        start_date=start.isoformat() if start else "",
     )
 
 
@@ -214,12 +216,14 @@ def _coords_at(origin: RouteStop, dest: RouteStop | None, covered: float) -> tup
     )
 
 
-def waiting_position(number: str, route: SavedRoute, now: datetime) -> TrainPosition | None:
+def waiting_position(number: str, route: SavedRoute, now: datetime, start: date | None = None) -> TrainPosition | None:
     stops = route.stops
     if len(stops) < 2:
         return None
     origin = stops[0]
-    wait = _next_wait(origin.depart_min, route.run_days, now)
+    wait = ((start - now.date()).days * 1440 + origin.depart_min - now.hour * 60 - now.minute) if start else _next_wait(origin.depart_min, route.run_days, now)
+    if wait is not None and not (-_GRACE_MIN <= wait <= _LEAD_MIN):
+        wait = None
     if wait is None:
         return None
     clock = origin.depart_min % 1440
@@ -238,6 +242,7 @@ def waiting_position(number: str, route: SavedRoute, now: datetime) -> TrainPosi
         covered_km=origin.km,
         origin_name=origin.name,
         scheduled_at=f"{clock // 60:02d}:{clock % 60:02d}",
+        start_date=start.isoformat() if start else "",
     )
 
 
@@ -387,7 +392,15 @@ def _eta_from_clock(
     age = max(0.0, position.age_minutes)
     if position.run == "at" or position.at_station:
         # A stopped report supplies no evidence of travel since it was made.
-        by_delay = (gate_clock + position.delay_minutes) - _run_now(position.as_of, train_clock, position.delay_minutes)
+        frame = _run_now(position.as_of, train_clock, position.delay_minutes)
+        if position.start_date:
+            try:
+                origin = datetime.fromisoformat(position.start_date).date()
+                frame = ((position.as_of.date() - origin).days * 1440 + position.as_of.hour * 60
+                         + position.as_of.minute + position.as_of.second / 60)
+            except ValueError:
+                pass
+        by_delay = (gate_clock + position.delay_minutes) - frame
         leave = train_clock if leave_clock is None else leave_clock
         return max(by_delay, 0.0, gate_clock - leave)
     # A moving train: the timetable run from where it was reported, less the time since that report.

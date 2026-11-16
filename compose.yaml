@@ -1,0 +1,38 @@
+# All three processes use the same SQLite file on this host's named volume.
+x-service: &service
+  build: .
+  image: gateahead-backend:local
+  env_file: .env
+  environment:
+    GATEAHEAD_DATA: /var/lib/gateahead
+  volumes:
+    - gateahead-data:/var/lib/gateahead
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *service
+    command: ["uvicorn", "gateahead.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json, urllib.request; assert json.load(urllib.request.urlopen('http://localhost:8000/health', timeout=5))['ok']"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+  worker:
+    <<: *service
+    command: ["python", "-m", "gateahead.catalog", "sync", "--watch", "--interval-seconds", "60"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "gateahead.catalog", "check"]
+      interval: 60s
+      timeout: 10s
+      start_period: 5m
+      retries: 3
+  bot:
+    <<: *service
+    profiles: ["telegram"]
+    command: ["python", "-m", "gateahead.bot"]
+
+volumes:
+  gateahead-data:

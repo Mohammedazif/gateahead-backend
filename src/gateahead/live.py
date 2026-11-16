@@ -37,23 +37,44 @@ class LiveLook:
     notice: str
     finished: bool
     fetched_at: float | None = None
+    start_date: str = ""
+    operating_status: str = "running"
 
 
 async def fetch_lts(session: aiohttp.ClientSession, train_number: str) -> dict | None:
     return (await fetch_live(session, train_number)).moving
 
 
-def cached_live(train_number: str, cache: SnapshotCache | None = None) -> LiveLook | None:
+def cached_live(train_number: str, cache: SnapshotCache | None = None, start: date | None = None) -> LiveLook | None:
+    if start is not None:
+        key = f"live:v2:{train_number}:{start.isoformat()}"
+        raw = cache.peek(key) if cache else None
+        if raw is None and cache:
+            legacy = cache.peek(f"live:{train_number}")
+            if legacy and report_start(legacy.get("moving") or {}) == start.isoformat():
+                raw = {**legacy, "start_date": start.isoformat()}
+        return LiveLook(**{**raw, "operating_status": raw.get("operating_status", operating_status(raw.get("moving")))}) if raw else None
     if cache is not None:
         raw = cache.peek(f"live:{train_number}")
-        return LiveLook(raw["moving"], raw["notice"], raw["finished"], raw.get("fetched_at")) if raw else None
+        return LiveLook(raw["moving"], raw["notice"], raw["finished"], raw.get("fetched_at"), raw.get("start_date", ""),
+                        raw.get("operating_status", operating_status(raw.get("moving")))) if raw else None
     hit = _lts_cache.get(train_number)
     return hit[1] if hit and time.monotonic() - hit[0] < _LTS_TTL else None
 
 
 async def fetch_live(
-    session: aiohttp.ClientSession, train_number: str, cache: SnapshotCache | None = None
+    session: aiohttp.ClientSession, train_number: str, cache: SnapshotCache | None = None, start: date | None = None
 ) -> LiveLook:
+    if start is not None:
+        existing = cached_live(train_number, cache, start)
+        if existing is not None:
+            return existing
+        async def load_run() -> dict:
+            look = await fetch_run(session, train_number, start)
+            return {"moving": look.moving, "notice": look.notice, "finished": look.finished,
+                    "fetched_at": time.time(), "start_date": start.isoformat(), "operating_status": look.operating_status}
+        raw = await cache.get(f"live:v2:{train_number}:{start.isoformat()}", _LTS_TTL, load_run) if cache else await load_run()
+        return LiveLook(**raw)
     now = time.monotonic()
     hit = _lts_cache.get(train_number)
     if cache is None and hit and now - hit[0] < _LTS_TTL:
@@ -61,15 +82,60 @@ async def fetch_live(
     if cache is not None:
         async def load() -> dict:
             look = await _fetch_live_data(session, train_number)
-            return {"moving": look.moving, "notice": look.notice, "finished": look.finished, "fetched_at": time.time()}
+            return {"moving": look.moving, "notice": look.notice, "finished": look.finished, "fetched_at": time.time(),
+                    "start_date": look.start_date, "operating_status": look.operating_status}
 
         raw = await cache.get(f"live:{train_number}", _LTS_TTL, load)
-        look = LiveLook(raw["moving"], raw["notice"], raw["finished"], raw.get("fetched_at"))
+        look = LiveLook(raw["moving"], raw["notice"], raw["finished"], raw.get("fetched_at"), raw.get("start_date", ""),
+                        raw.get("operating_status", operating_status(raw.get("moving"))))
     else:
         look = replace(await _fetch_live_data(session, train_number), fetched_at=time.time())
     if cache is None:
         _lts_cache[train_number] = (time.monotonic(), look)
     return look
+
+
+def report_start(lts: dict) -> str:
+    value = str(lts.get("train_start_date") or lts.get("start_date") or "").strip()
+    for pattern in ("%Y-%m-%d", "%d-%m-%Y", "%d %b %Y"):
+        try:
+            return datetime.strptime(value[:10] if pattern != "%d %b %Y" else value, pattern).date().isoformat()
+        except ValueError:
+            pass
+    return ""
+
+
+def operating_status(lts: dict | None) -> str:
+    if not lts:
+        return "unknown"
+    enabled = lambda value: value is True or str(value).lower() in {"1", "true", "yes"}
+    text = " ".join(str(lts.get(k) or "") for k in ("train_status", "running_status", "message", "new_message")).lower()
+    text = re.sub(r"\b(?:not|never)\s+(?:(?:been|be|is|yet|currently)\s+)*(?:cancelled|canceled|diverted)\b", "", text)
+    if any(enabled(lts.get(k)) for k in ("is_partially_cancelled", "is_partially_canceled")) or re.search(r"\bpartially cancell?ed\b", text) or "partial cancellation" in text:
+        return "partially_cancelled"
+    if any(enabled(lts.get(k)) for k in ("is_cancelled", "cancelled", "is_canceled", "canceled")) or re.search(r"\bcancell?ed\b", text):
+        return "cancelled"
+    if enabled(lts.get("is_diverted")) or enabled(lts.get("diverted")) or re.search(r"(?<!not )\bdiverted\b", text):
+        return "diverted"
+    return "running"
+
+
+async def fetch_run(session: aiohttp.ClientSession, number: str, start: date) -> LiveLook:
+    offset = (datetime.now(INDIA).date() - start).days
+    if offset < 0:
+        return LiveLook(None, "Not started", False, start_date=start.isoformat())
+    payload = await _fetch_lts_api(session, number, offset)
+    if payload is None:
+        payload = await _fetch_lts_page(session, number, start)
+    # Never relabel today's response as an older journey when an upstream ignores the requested date.
+    if payload is None or report_start(payload) != start.isoformat():
+        return LiveLook(None, "Journey-date report unavailable", False, start_date=start.isoformat(), operating_status="unknown")
+    status = operating_status(payload)
+    if status != "running":
+        return LiveLook(payload, str(payload.get("new_message") or payload.get("message") or status.replace("_", " ")),
+                        status == "cancelled", start_date=start.isoformat(), operating_status=status)
+    result = classify_live(payload, None)
+    return replace(result, start_date=start.isoformat())
 
 
 async def _fetch_live_data(session: aiohttp.ClientSession, train_number: str) -> LiveLook:
@@ -102,6 +168,10 @@ def _choose_lts(today: dict | None, yesterday: dict | None) -> dict | None:
 
 
 def classify_live(today: dict | None, yesterday: dict | None) -> LiveLook:
+    if today and operating_status(today) in {"cancelled", "diverted", "partially_cancelled"}:
+        state = operating_status(today)
+        return LiveLook(today, str(today.get("new_message") or today.get("message") or state), state == "cancelled",
+                        start_date=report_start(today), operating_status=state)
     moving = _choose_lts(today, yesterday)
     if moving is not None:
         return LiveLook(moving, "", False)
@@ -129,8 +199,13 @@ def _bare_origin(lts: dict | None) -> bool:
     return not (lts.get("current_station_code") or lts.get("current_station_name"))
 
 
-def _keep_notice(raw: object) -> dict | None:
+def _keep_notice(raw: object, start: date | None = None) -> dict | None:
     if isinstance(raw, list):
+        if start is not None:
+            raw = [row for row in raw if isinstance(row, dict) and report_start(row) == start.isoformat()]
+        for row in raw:
+            if isinstance(row, dict) and operating_status(row) in {"cancelled", "diverted", "partially_cancelled"}:
+                return row
         kept = _normalize_lts(raw)
         if kept is not None:
             return kept
@@ -138,7 +213,7 @@ def _keep_notice(raw: object) -> dict | None:
             if isinstance(row, dict) and _notice_text(row):
                 return row
         return None
-    if isinstance(raw, dict) and (raw.get("success") or _notice_text(raw)):
+    if isinstance(raw, dict) and (raw.get("success") or _notice_text(raw) or operating_status(raw) in {"cancelled", "diverted", "partially_cancelled"}):
         return raw
     return None
 
@@ -164,9 +239,9 @@ async def _fetch_lts_api(session: aiohttp.ClientSession, train_number: str, day:
             payload = await response.json(content_type=None)
     except (aiohttp.ClientError, TimeoutError, ValueError):
         return None
-    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+    if isinstance(payload, dict) and isinstance(payload.get("data"), (dict, list)):
         payload = payload["data"]
-    return _keep_notice(payload)
+    return _keep_notice(payload, datetime.now(INDIA).date() - timedelta(days=day))
 
 
 def _usable(lts: dict | None) -> bool:
@@ -203,8 +278,8 @@ async def _fetch_lts_page(
             raw = payload
         except json.JSONDecodeError:
             raw = None
-    lts = _normalize_lts(raw)
-    if _usable(lts):
+    lts = _keep_notice(raw, start)
+    if _usable(lts) or (lts and operating_status(lts) in {"cancelled", "diverted", "partially_cancelled"}):
         return lts
     return _lts_from_html(html, train_number)
 
@@ -377,6 +452,7 @@ def position_from_lts(train_number: str, lts: dict, now: datetime | None = None)
         left_km=_left_km(lts),
         run=run,
         covered_km=_covered_km(lts),
+        start_date=report_start(lts),
     )
 
 
