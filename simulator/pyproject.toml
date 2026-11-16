@@ -1,0 +1,10 @@
+[project]
+name = "gatesim"
+version = "0.1.0"
+description = "Minute-by-minute level-crossing simulator for the GateAhead backend. Not part of the app."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+# The simulator drives the real backend code from the enclosing backend checkout.
+pythonpath = ["../src", "."]
+testpaths = ["tests"]

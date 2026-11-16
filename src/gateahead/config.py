@@ -51,6 +51,8 @@ class Settings:
     alert_poll_seconds: int
     alert_cooldown_min: int
     log_level: str
+    live_check_budget: int = 30
+    route_max_age_hours: float = 168
 
     @property
     def db_path(self) -> Path:
@@ -73,4 +75,6 @@ def load_settings() -> Settings:
         alert_poll_seconds=int(os.getenv("ALERT_POLL_SECONDS", "180")),
         alert_cooldown_min=int(os.getenv("ALERT_COOLDOWN_MIN", "15")),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        live_check_budget=max(1, int(os.getenv("LIVE_CHECK_BUDGET", "30"))),
+        route_max_age_hours=max(1, float(os.getenv("ROUTE_MAX_AGE_HOURS", "168"))),
     )

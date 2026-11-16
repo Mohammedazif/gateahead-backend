@@ -7,6 +7,104 @@ from gateahead.live import (
     classify_live,
 )
 
+import pytest
+
+
+@pytest.mark.parametrize("age", ["8", "14.5", 14.5])
+def test_live_report_age_accepts_provider_numeric_strings(age):
+    from datetime import datetime
+    from gateahead.live import position_from_lts
+
+    position = position_from_lts("16650", {
+        "current_station_code": "PAZ", "cur_stn_lat": 12.02, "cur_stn_lng": 75.25,
+        "status": "A", "status_as_of_min": age,
+    }, datetime(2026, 11, 16, 19, 8))
+    assert position.age_minutes == float(age)
+
+
+@pytest.mark.parametrize("age", [float("inf"), float("nan"), "inf", "nan", "invalid", 10**20])
+def test_invalid_report_age_is_unresolved_instead_of_fresh_or_crashing(age):
+    from datetime import datetime
+    from gateahead.live import position_from_lts
+
+    position = position_from_lts("16650", {
+        "current_station_code": "PAZ", "status": "A", "status_as_of_min": age,
+    }, datetime(2026, 11, 16, 19, 8))
+    assert position.age_minutes >= 8
+
+
+@pytest.mark.parametrize("coords", [("nan", 75), (12, "inf"), (91, 75), (12, -181)])
+def test_invalid_provider_coordinates_do_not_enter_predictions(coords):
+    from gateahead.live import position_from_lts
+
+    position = position_from_lts("16650", {
+        "current_station_code": "PAZ", "status": "A", "cur_stn_lat": coords[0], "cur_stn_lng": coords[1],
+    })
+    # A named station can be resolved against the timetable later.
+    assert position.coords == (0, 0)
+
+
+def test_malformed_optional_provider_numbers_do_not_abort_a_live_batch():
+    from gateahead.live import position_from_lts
+
+    position = position_from_lts("16650", {
+        "current_station_code": "PAZ", "status": "T", "cur_stn_lat": 12.02, "cur_stn_lng": 75.25,
+        "delay": float("inf"), "platform_number": float("inf"),
+        "distance_from_source": "nan", "total_distance": float("inf"),
+        "upcoming_stations": [{"station_code": "PAY", "a_min": float("inf")}],
+    })
+    assert position.delay_minutes == 0
+    assert position.platform == ""
+    assert position.covered_km is None
+    assert position.left_km is None
+    assert position.station_etas == ()
+
+
+def test_malformed_upcoming_station_container_does_not_abort_a_live_batch():
+    from gateahead.live import position_from_lts
+
+    position = position_from_lts("16650", {
+        "current_station_code": "PAZ", "status": "T", "upcoming_stations": 1,
+    })
+    assert position.upcoming_codes == ()
+    assert position.station_etas == ()
+
+
+def test_malformed_provider_page_data_preserves_the_html_fallback():
+    import asyncio
+    import json
+    from gateahead.live import _fetch_lts_page
+
+    class Response:
+        status = 200
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def text(self):
+            return (f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(self.payload)}</script>'
+                    '<a href="?current_station=PAY">Current report</a>')
+
+    class Session:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def get(self, *args, **kwargs):
+            return Response(self.payload)
+
+    async def run():
+        for payload in [None, [], {"props": []}, {"props": {"pageProps": "unavailable"}}]:
+            live = await _fetch_lts_page(Session(payload), "16650", None)
+            assert live["current_station_code"] == "PAY"
+
+    asyncio.run(run())
+
 
 def test_normalize_dict():
     raw = {"success": True, "current_station_code": "PAY", "at_src": False}

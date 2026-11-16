@@ -9,10 +9,10 @@ from datetime import datetime, timedelta
 import aiohttp
 
 from gateahead.config import Settings
-from gateahead.geo import along_route, closest_on_segment
+from gateahead.geo import along_route, closest_on_segment, km as geo_km
 from gateahead.halts import clean_code
 from gateahead.models import Crossing, RouteStop, SavedRoute, TrainPosition
-from gateahead.predict import PASS_GRACE_MIN, classify
+from gateahead.predict import PASS_GRACE_MIN, REPORT_FRESH_MIN, classify
 
 _URL = "https://www.railyatri.in/time-table/{number}"
 _NEXT = re.compile(
@@ -37,6 +37,7 @@ _LIVE_PAST_MIN = 360.0
 _LIVE_AHEAD_MIN = 150.0
 _CLOSE_TRUST_MIN = 30.0
 _DISAGREE_MIN = 20.0
+_UNCONFIRMED_ROUTE_SLACK_MIN = 4.0
 BEND_HALF_KM = 15.0
 _WEEK = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 
@@ -49,6 +50,8 @@ class TimetableCall:
     placed: bool
     # Minutes since the train went over the gate, when it already has.
     ago: float | None = None
+    awaiting_update: bool = False
+    inferred_route: bool = False
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,7 @@ class Call:
     source: str
     slack: float
     ago: float | None = None
+    awaiting_update: bool = False
 
 
 def parse_timetable_html(html: str) -> list[RouteStop]:
@@ -72,7 +76,9 @@ def parse_schedule(html: str) -> tuple[list[RouteStop], str]:
         payload = json.loads(match.group(1))
     except json.JSONDecodeError:
         return [], ""
-    table = payload.get("props", {}).get("pageProps", {}).get("trainTimeTable")
+    for key in ("props", "pageProps", "trainTimeTable"):
+        payload = payload.get(key) if isinstance(payload, dict) else None
+    table = payload
     if not isinstance(table, dict):
         return [], ""
     rows, run_days = _schedule(table)
@@ -107,6 +113,13 @@ def classify_passage(
     if _LIVE_AHEAD_MIN < delta <= _FAR_MIN:
         return "cold"
     return "skip"
+
+
+def passage_delta(stops: list[RouteStop], run_days: str, lat: float, lon: float, now: datetime) -> float | None:
+    gate_km = project_km(stops, lat, lon, _REACH_KM)
+    clock = clock_at(stops, gate_km, "move") if gate_km is not None else None
+    found = _best_delta(clock, run_days, now) if clock is not None else None
+    return found[0] if found else None
 
 
 def scheduled_position(
@@ -150,7 +163,9 @@ def scheduled_position(
 def _best_delta(clock: float, run_days: str, now: datetime) -> tuple[float, float] | None:
     minute = now.hour * 60 + now.minute + now.second / 60.0
     best: tuple[float, float] | None = None
-    for shift in range(-1, 3):
+    # Operating days refer to departure from the origin, including on day 3+.
+    journey_day = int(clock // 1440)
+    for shift in range(-journey_day - 1, 3):
         if not runs_on(run_days, now + timedelta(days=shift)):
             continue
         delta = clock + shift * 1440 - minute
@@ -288,6 +303,10 @@ def timetable_call(
     gate_km = project_km(stops, crossing.lat, crossing.lon, _GATE_OFF_KM)
     if gate_km is None and rail:
         gate_km = _km_on_rail(stops, crossing, rail)
+    inferred_route = False
+    if gate_km is None and rail:
+        gate_km = _km_on_bent_leg(stops, crossing, rail)
+        inferred_route = gate_km is not None
     if placed is None or gate_km is None:
         return TimetableCall(None, None, 0, False)
     train_km, mode = placed
@@ -297,16 +316,23 @@ def timetable_call(
         return TimetableCall(None, None, 0, False)
     if train_km > gate_km + 0.3:
         ago = max(0.0, train_clock - gate_clock) + max(0.0, position.age_minutes)
-        return TimetableCall(None, None, 0, True, ago)
+        return TimetableCall(None, None, 0, True, ago, inferred_route=inferred_route)
     leave_clock = clock_at(stops, train_km, "depart") if mode == "arrive" else train_clock
+    if (position.at_station or position.run == "at") and position.age_minutes >= REPORT_FRESH_MIN:
+        return TimetableCall(None, None, 0, True, awaiting_update=True, inferred_route=inferred_route)
     eta = _eta_from_clock(position, train_clock, gate_clock, leave_clock)
     if eta < -PASS_GRACE_MIN:
-        return TimetableCall(None, None, 0, True, -eta)
+        return TimetableCall(None, None, 0, True, -eta, inferred_route=inferred_route)
     span = _span(stops, gate_km)
     bracket = None
     if span and (span[1].km - span[0].km >= 15 or eta > 30):
         bracket = f"between {span[0].code} and {span[1].code}"
-    return TimetableCall(eta, bracket, float(halt_slack(stops, train_km, gate_km)), True)
+    slack = float(halt_slack(stops, train_km, gate_km))
+    if inferred_route:
+        # Geometry compatible with a route cannot establish its occupied line.
+        # Keep the estimate available without asserting closure or animation.
+        slack = max(slack, _UNCONFIRMED_ROUTE_SLACK_MIN)
+    return TimetableCall(eta, bracket, slack, True, inferred_route=inferred_route)
 
 
 def merge_call(
@@ -331,7 +357,7 @@ def merge_call(
     ):
         return local
     if timed.placed:
-        return Call(timed.eta, timed.bracket or local.bracket, "timetable", timed.slack, timed.ago)
+        return Call(timed.eta, timed.bracket or local.bracket, "timetable", timed.slack, timed.ago, timed.awaiting_update)
     return local
 
 
@@ -360,11 +386,10 @@ def _eta_from_clock(
 ) -> float:
     age = max(0.0, position.age_minutes)
     if position.run == "at" or position.at_station:
-        # A train standing at a station leaves at its timetable departure plus the delay it reports,
-        # and it cannot reach the gate sooner than the run from that station, counted from the report.
+        # A stopped report supplies no evidence of travel since it was made.
         by_delay = (gate_clock + position.delay_minutes) - _run_now(position.as_of, train_clock, position.delay_minutes)
         leave = train_clock if leave_clock is None else leave_clock
-        return max(by_delay, (gate_clock - leave) - age)
+        return max(by_delay, 0.0, gate_clock - leave)
     # A moving train: the timetable run from where it was reported, less the time since that report.
     return (gate_clock - train_clock) - age
 
@@ -372,7 +397,8 @@ def _eta_from_clock(
 def _run_now(as_of: datetime, train_clock: float, delay: int) -> float:
     minute = as_of.hour * 60 + as_of.minute + as_of.second / 60.0
     target = train_clock - delay
-    return min((minute + 1440 * shift for shift in range(-1, 3)), key=lambda item: abs(item - target))
+    day = math.floor((target - minute) / 1440)
+    return min((minute + 1440 * shift for shift in (day, day + 1)), key=lambda item: abs(item - target))
 
 
 def project_km(
@@ -455,13 +481,15 @@ def train_place(stops: list[RouteStop], position: TrainPosition) -> tuple[float,
 def clock_at(stops: list[RouteStop], km: float, mode: str) -> float | None:
     if len(stops) < 2 or km < stops[0].km - 0.4 or km > stops[-1].km + 0.4:
         return None
+    if mode in {"arrive", "depart"}:
+        at_stop = min(stops, key=lambda stop: abs(stop.km - km))
+        if abs(at_stop.km - km) <= 0.4:
+            return float(at_stop.depart_min if mode == "depart" else at_stop.arrive_min)
     for origin, dest in zip(stops, stops[1:]):
         if km > dest.km + 0.05:
             continue
         if km < origin.km - 0.05:
             break
-        if mode in {"arrive", "depart"} and abs(km - origin.km) <= 0.4:
-            return float(origin.depart_min if mode == "depart" else origin.arrive_min)
         span = dest.km - origin.km
         if span <= 0.05:
             return float(origin.depart_min)
@@ -510,6 +538,45 @@ def _km_on_rail(
             portion = min(1.0, max(0.0, (gate_along - start) / (end - start)))
             return start_km + portion * (end_km - start_km)
     return None
+
+
+def _km_on_bent_leg(
+    stops: list[RouteStop], crossing: Crossing, rail: list[tuple[float, float]]
+) -> float | None:
+    """Estimate a long nonstop leg where the local mapped rail bends off its chord.
+
+    The two published calls can be outside the fetched map. Require a rail
+    continuing across the crossing in that leg's direction, and a trip via
+    the gate that fits the published track distance. This remains a route
+    estimate, not confirmation of the train's occupied track.
+    """
+    usable = [stop for stop in stops if stop.lat is not None and stop.lon is not None]
+    best = None
+    best_off = _STOP_OFF_KM
+    for origin, dest in zip(usable, usable[1:]):
+        span = dest.km - origin.km
+        if span < 15:
+            continue
+        start, end = (origin.lat, origin.lon), (dest.lat, dest.lon)
+        _point, portion, offset = closest_on_segment(crossing.coords, start, end)
+        if not 0 < portion < 1 or offset >= best_off:
+            continue
+        before, after = geo_km(start, crossing.coords), geo_km(crossing.coords, end)
+        if before + after > span + _ROUTE_END_KM:
+            continue
+        # A transverse branch through the gate is insufficient evidence that
+        # this timetable leg follows the displayed rail.
+        end_portions = [closest_on_segment(point, start, end)[1] for point in (rail[0], rail[-1])]
+        if ((portion - min(end_portions)) * span <= 0.05
+                or (max(end_portions) - portion) * span <= 0.05):
+            continue
+        rail_span = geo_km(rail[0], rail[-1])
+        progress = (max(end_portions) - min(end_portions)) * geo_km(start, end)
+        if rail_span < 0.05 or progress < rail_span * 0.5:
+            continue
+        best = origin.km + span * before / (before + after)
+        best_off = offset
+    return best
 
 
 def _next_wait(depart_min: int, run_days: str, now: datetime) -> float | None:
@@ -605,15 +672,16 @@ def _float(value: object) -> float | None:
     if value is None or value == "":
         return None
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
         return None
+    return number if math.isfinite(number) else None
 
 
 def _int(value: object) -> int:
     try:
         return int(float(value))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -82,11 +84,53 @@ class Store:
               lon REAL,
               PRIMARY KEY (train_number, seq)
             );
+            CREATE TABLE IF NOT EXISTS train_catalog (
+              train_number TEXT PRIMARY KEY,
+              discovered_at REAL NOT NULL,
+              source TEXT NOT NULL,
+              retry_after REAL NOT NULL DEFAULT 0,
+              failures INTEGER NOT NULL DEFAULT 0,
+              live_checked_at REAL NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS train_stops_code ON train_stops(code, train_number);
+            CREATE TABLE IF NOT EXISTS station_scans (
+              code TEXT PRIMARY KEY,
+              checked_at REAL,
+              retry_after REAL NOT NULL DEFAULT 0,
+              failures INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS catalog_lock (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              owner TEXT NOT NULL,
+              expires REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS route_segments (
+              id INTEGER PRIMARY KEY,
+              train_number TEXT NOT NULL,
+              seq INTEGER NOT NULL,
+              UNIQUE(train_number, seq)
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS route_segment_bounds USING rtree(
+              id, min_lat, max_lat, min_lon, max_lon
+            );
+            CREATE TRIGGER IF NOT EXISTS delete_route_segment AFTER DELETE ON route_segments
+            BEGIN
+              DELETE FROM route_segment_bounds WHERE id=old.id;
+            END;
             """
         )
         columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(train_routes)")}
         if "run_days" not in columns:
             self._conn.execute("ALTER TABLE train_routes ADD COLUMN run_days TEXT NOT NULL DEFAULT ''")
+        self._conn.execute(
+            "INSERT OR IGNORE INTO train_catalog (train_number, discovered_at, source) "
+            "SELECT train_number, ?, 'cache' FROM train_routes", (time.time(),),
+        )
+        if self.meta("route_segment_index") != "1":
+            for row in self._conn.execute("SELECT train_number FROM train_routes").fetchall():
+                stops = self._conn.execute("SELECT * FROM train_stops WHERE train_number=? ORDER BY seq", (row[0],)).fetchall()
+                self._index_route(row[0], [_route_stop(stop) for stop in stops])
+            self._conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('route_segment_index', '1')")
         self._conn.commit()
 
     def get_user(self, user_id: int) -> User:
@@ -286,7 +330,7 @@ class Store:
         )
         self._conn.commit()
 
-    def remember_stop_halts(self, stops: list[RouteStop]) -> int:
+    def remember_stop_halts(self, stops: list[RouteStop], *, commit: bool = True) -> int:
         from gateahead.halts import clean_code, halt_kind
 
         rows = []
@@ -312,7 +356,8 @@ class Store:
             rows,
         )
         added = self.halt_count() - before
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
         return added
 
     def fill_blank_zones(self, zones: dict[str, str]) -> int:
@@ -364,64 +409,59 @@ class Store:
         return {row["train_number"]: row["name"] for row in rows}
 
     def save_route(self, number: str, stops: list[RouteStop], run_days: str = "") -> None:
-        self._conn.execute("DELETE FROM train_stops WHERE train_number = ?", (number,))
-        self._conn.executemany(
-            """
-            INSERT INTO train_stops (
-              train_number, seq, code, name, km, arrive_min, depart_min, halt_min, stops, lat, lon
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    number,
-                    stop.seq,
-                    stop.code,
-                    stop.name,
-                    stop.km,
-                    stop.arrive_min,
-                    stop.depart_min,
-                    stop.halt_min,
-                    int(stop.stops),
-                    stop.lat,
-                    stop.lon,
-                )
-                for stop in stops
-            ],
-        )
-        self._conn.execute(
-            """
-            INSERT INTO train_routes (train_number, fetched_at, run_days) VALUES (?, ?, ?)
-            ON CONFLICT(train_number) DO UPDATE SET
-              fetched_at=excluded.fetched_at,
-              run_days=CASE
-                WHEN excluded.run_days = '' THEN train_routes.run_days
-                ELSE excluded.run_days
-              END
-            """,
-            (number, datetime.now().isoformat(timespec="seconds"), run_days or ""),
-        )
-        self.remember_stop_halts(stops)
-        self._conn.commit()
+        if len(stops) < 2:
+            raise ValueError("A route needs at least two points")
+        with self._conn:
+            self._conn.execute("DELETE FROM train_stops WHERE train_number = ?", (number,))
+            self._conn.executemany(
+                "INSERT INTO train_stops (train_number, seq, code, name, km, arrive_min, depart_min, halt_min, stops, lat, lon) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(number, s.seq, s.code, s.name, s.km, s.arrive_min, s.depart_min,
+                  s.halt_min, int(s.stops), s.lat, s.lon) for s in stops],
+            )
+            self._conn.execute(
+                "INSERT INTO train_routes (train_number, fetched_at, run_days) VALUES (?, ?, ?) "
+                "ON CONFLICT(train_number) DO UPDATE SET fetched_at=excluded.fetched_at, "
+                "run_days=CASE WHEN excluded.run_days='' THEN train_routes.run_days ELSE excluded.run_days END",
+                (number, datetime.now().isoformat(timespec="seconds"), run_days or ""),
+            )
+            self._conn.execute(
+                "INSERT INTO train_catalog (train_number, discovered_at, source) VALUES (?, ?, 'timetable') "
+                "ON CONFLICT(train_number) DO UPDATE SET retry_after=0, failures=0", (number, time.time()),
+            )
+            self._index_route(number, stops)
+            self.remember_stop_halts(stops, commit=False)
 
-    def route_numbers_near(self, lat: float, lon: float, radius_km: float, max_age_hours: float) -> list[str]:
-        # Coarse candidates include legs crossing the area, even when neither
-        # endpoint stops nearby. Passage classification checks the route next.
+    def _index_route(self, number: str, stops: list[RouteStop]) -> None:
+        self._conn.execute("DELETE FROM route_segments WHERE train_number=?", (number,))
+        located = [s for s in stops if s.lat is not None and s.lon is not None
+                   and math.isfinite(s.lat) and math.isfinite(s.lon)]
+        for start, end in zip(located, located[1:]):
+            if end.km - start.km < 0.05:
+                continue
+            cursor = self._conn.execute(
+                "INSERT INTO route_segments (train_number, seq) VALUES (?, ?)", (number, start.seq),
+            )
+            self._conn.execute(
+                "INSERT INTO route_segment_bounds VALUES (?, ?, ?, ?, ?)",
+                (cursor.lastrowid, min(start.lat, end.lat), max(start.lat, end.lat),
+                 min(start.lon, end.lon), max(start.lon, end.lon)),
+            )
+
+    def route_numbers_near(self, lat: float, lon: float, radius_km: float, max_age_hours: float | None) -> list[str]:
         delta_lat = radius_km / 110.57
         delta_lon = radius_km / (111.32 * max(0.2, abs(math.cos(math.radians(lat)))))
-        cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat(timespec="seconds")
+        cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat(timespec="seconds") if max_age_hours is not None else ""
         rows = self._conn.execute(
-            "SELECT DISTINCT r.train_number FROM train_routes r JOIN train_stops s ON s.train_number=r.train_number "
-            "LEFT JOIN train_stops t ON t.train_number=s.train_number AND t.seq=("
-            "SELECT MIN(n.seq) FROM train_stops n WHERE n.train_number=s.train_number AND n.seq>s.seq) "
-            "WHERE r.fetched_at >= ? "
-            "AND MIN(s.lat, COALESCE(t.lat,s.lat)) <= ? AND MAX(s.lat, COALESCE(t.lat,s.lat)) >= ? "
-            "AND MIN(s.lon, COALESCE(t.lon,s.lon)) <= ? AND MAX(s.lon, COALESCE(t.lon,s.lon)) >= ? "
-            "ORDER BY r.fetched_at DESC LIMIT 200",
+            "SELECT DISTINCT r.train_number FROM route_segment_bounds b "
+            "CROSS JOIN route_segments s ON s.id=b.id CROSS JOIN train_routes r ON r.train_number=s.train_number "
+            "WHERE r.fetched_at >= ? AND b.min_lat <= ? AND b.max_lat >= ? "
+            "AND b.min_lon <= ? AND b.max_lon >= ? ORDER BY r.train_number",
             (cutoff, lat + delta_lat, lat - delta_lat, lon + delta_lon, lon - delta_lon),
         ).fetchall()
         return [row["train_number"] for row in rows]
 
-    def load_route(self, number: str, max_age_hours: float) -> SavedRoute | None:
+    def load_route(self, number: str, max_age_hours: float | None) -> SavedRoute | None:
         row = self._conn.execute(
             "SELECT fetched_at, run_days FROM train_routes WHERE train_number = ?",
             (number,),
@@ -432,13 +472,143 @@ class Store:
             fetched = datetime.fromisoformat(row["fetched_at"])
         except ValueError:
             return None
-        if (datetime.now() - fetched).total_seconds() > max_age_hours * 3600:
+        if max_age_hours is not None and (datetime.now() - fetched).total_seconds() > max_age_hours * 3600:
             return None
         rows = self._conn.execute(
             "SELECT * FROM train_stops WHERE train_number = ? ORDER BY seq",
             (number,),
         ).fetchall()
         return SavedRoute([_route_stop(item) for item in rows], str(row["run_days"] or ""))
+
+    def remember_train_candidates(self, numbers: list[str], source: str = "discovery") -> None:
+        stamp = time.time()
+        with self._conn:
+            self._conn.executemany(
+                "INSERT INTO train_catalog (train_number, discovered_at, source) VALUES (?, ?, ?) "
+                "ON CONFLICT(train_number) DO NOTHING",
+                [(n, stamp, source) for n in dict.fromkeys(numbers) if re.fullmatch(r"\d{5}", n)],
+            )
+
+    def due_stations(self, limit: int, refresh_hours: float) -> list[Halt]:
+        rows = self._conn.execute(
+            "SELECT h.* FROM halts h LEFT JOIN station_scans s ON s.code=h.code "
+            "WHERE (s.checked_at IS NULL OR s.checked_at < ?) AND COALESCE(s.retry_after,0) <= ? "
+            "ORDER BY COALESCE(s.checked_at,0), h.code LIMIT ?",
+            (time.time() - refresh_hours * 3600, time.time(), limit),
+        ).fetchall()
+        return [_halt(row) for row in rows]
+
+    def record_station_scan(self, code: str, success: bool) -> None:
+        with self._conn:
+            self._conn.execute("INSERT OR IGNORE INTO station_scans (code) VALUES (?)", (code,))
+            if success:
+                self._conn.execute(
+                    "UPDATE station_scans SET checked_at=?, retry_after=0, failures=0 WHERE code=?", (time.time(), code),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE station_scans SET retry_after=? + MIN(21600,300 * (1 << MIN(failures,6))), "
+                    "failures=failures+1 WHERE code=?", (time.time(), code),
+                )
+
+    def due_routes(self, limit: int, refresh_hours: float) -> list[str]:
+        cutoff = (datetime.now() - timedelta(hours=refresh_hours)).isoformat(timespec="seconds")
+        rows = self._conn.execute(
+            "SELECT c.train_number FROM train_catalog c LEFT JOIN train_routes r USING(train_number) "
+            "WHERE (r.fetched_at IS NULL OR r.fetched_at < ?) AND c.retry_after <= ? "
+            "ORDER BY COALESCE(r.fetched_at,''), c.discovered_at, c.train_number LIMIT ?",
+            (cutoff, time.time(), limit),
+        ).fetchall()
+        return [row[0] for row in rows]
+
+    def record_route_failure(self, number: str) -> None:
+        with self._conn:
+            self._conn.execute(
+                "UPDATE train_catalog SET retry_after=? + MIN(21600,300 * (1 << MIN(failures,6))), "
+                "failures=failures+1 WHERE train_number=?", (time.time(), number),
+            )
+
+    def route_refresh_allowed(self, number: str) -> bool:
+        row = self._conn.execute("SELECT retry_after FROM train_catalog WHERE train_number=?", (number,)).fetchone()
+        return row is None or row[0] <= time.time()
+
+    def live_check_times(self, numbers: list[str]) -> dict[str, float]:
+        found = {}
+        for start in range(0, len(numbers), 500):
+            batch = numbers[start:start + 500]
+            slots = ",".join("?" for _ in batch)
+            for row in self._conn.execute(
+                f"SELECT train_number, live_checked_at FROM train_catalog WHERE train_number IN ({slots})", batch,
+            ):
+                found[row[0]] = row[1]
+        return found
+
+    def record_live_checks(self, numbers: list[str]) -> None:
+        with self._conn:
+            self._conn.executemany(
+                "UPDATE train_catalog SET live_checked_at=? WHERE train_number=?", [(time.time(), n) for n in numbers],
+            )
+
+    def claim_catalog(self, owner: str) -> bool:
+        with self._conn:
+            return bool(self._conn.execute(
+                "INSERT INTO catalog_lock VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE "
+                "SET owner=excluded.owner, expires=excluded.expires WHERE catalog_lock.expires<=? OR catalog_lock.owner=?",
+                (owner, time.time() + 180, time.time(), owner),
+            ).rowcount)
+
+    def release_catalog(self, owner: str) -> None:
+        with self._conn:
+            self._conn.execute("DELETE FROM catalog_lock WHERE owner=?", (owner,))
+
+    def catalog_status(self, max_age_hours: float = 168) -> dict:
+        cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat(timespec="seconds")
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS known_trains, COUNT(r.train_number) AS routes, "
+            "COALESCE(SUM(r.fetched_at >= ?),0) AS fresh_routes, "
+            "COALESCE(SUM(c.failures>0),0) AS failed_refreshes "
+            "FROM train_catalog c LEFT JOIN train_routes r USING(train_number)", (cutoff,),
+        ).fetchone()
+        found = dict(row)
+        found["stale_routes"] = found["routes"] - found["fresh_routes"]
+        found["missing_routes"] = found["known_trains"] - found["routes"]
+        daily_cutoff = (datetime.now() - timedelta(hours=24)).isoformat(timespec="seconds")
+        found["routes_due_for_daily_refresh"] = self._conn.execute(
+            "SELECT COUNT(*) FROM train_catalog c LEFT JOIN train_routes r USING(train_number) "
+            "WHERE r.fetched_at IS NULL OR r.fetched_at < ?", (daily_cutoff,),
+        ).fetchone()[0]
+        found["stations"] = self.halt_count()
+        found["stations_scanned"] = self._conn.execute("SELECT COUNT(*) FROM station_scans WHERE checked_at IS NOT NULL").fetchone()[0]
+        found["stations_scanned_last_7_days"] = self._conn.execute(
+            "SELECT COUNT(*) FROM station_scans WHERE checked_at >= ?", (time.time() - 7 * 86400,),
+        ).fetchone()[0]
+        found["indexed_segments"] = self._conn.execute("SELECT COUNT(*) FROM route_segments").fetchone()[0]
+        found["routes_without_geometry"] = self._conn.execute(
+            "SELECT COUNT(*) FROM train_routes r WHERE NOT EXISTS "
+            "(SELECT 1 FROM route_segments s WHERE s.train_number=r.train_number)",
+        ).fetchone()[0]
+        found["last_sync"] = json.loads(self.meta("train_catalog_last_sync") or "null")
+        times = self._conn.execute("SELECT MIN(fetched_at), MAX(fetched_at) FROM train_routes").fetchone()
+        found["oldest_route_check"] = times[0]
+        found["newest_route_check"] = times[1]
+        found["station_source"] = self.meta("catalog_source") or "local"
+        found["geometry_basis"] = "legs_between_published_route_points"
+        found["route_max_age_hours"] = max_age_hours
+        found["national_coverage_verified"] = False
+        return found
+
+    def station_coverage(self, max_age_hours: float = 168):
+        cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat(timespec="seconds")
+        rows = self._conn.execute(
+            "SELECT h.code, h.name, h.lat, h.lon, sc.checked_at AS board_checked_at, "
+            "COUNT(DISTINCT t.train_number) AS known_stopping_or_passing_trains, "
+            "COUNT(DISTINCT CASE WHEN r.fetched_at>=? THEN t.train_number END) AS fresh_routes "
+            "FROM halts h LEFT JOIN station_scans sc ON sc.code=h.code "
+            "LEFT JOIN train_stops t ON t.code=h.code LEFT JOIN train_routes r ON r.train_number=t.train_number "
+            "GROUP BY h.code ORDER BY h.code", (cutoff,),
+        )
+        for row in rows:
+            yield dict(row)
 
     def halt(self, code: str) -> Halt | None:
         row = self._conn.execute("SELECT * FROM halts WHERE code = ?", (code.upper(),)).fetchone()

@@ -15,6 +15,7 @@ _PAST_KM = 0.6
 PASS_GRACE_MIN = 2.0
 # How long a train that just went over a gate stays listed as passed.
 JUST_PASSED_MIN = 5.0
+REPORT_FRESH_MIN = 8.0
 
 
 def crossing_is_ahead(position: TrainPosition, crossing: Crossing) -> bool:
@@ -66,7 +67,8 @@ def eta_minutes(position: TrainPosition, crossing: Crossing, settings: Settings)
         clock = (etas[crossing.nearest_station] - position.as_of).total_seconds() / 60.0
         if crossing.nearest_station == position.next_station or crossing.nearest_station in position.upcoming_codes[:2]:
             return clock
-    travelled = (settings.default_speed_kmh * max(0.0, position.age_minutes)) / 60.0
+    age = 0 if position.at_station or position.run == "at" else max(0.0, position.age_minutes)
+    travelled = settings.default_speed_kmh * age / 60.0
     remaining = dist - travelled
     return (remaining / settings.default_speed_kmh) * 60.0 if settings.default_speed_kmh else None
 
@@ -100,7 +102,8 @@ def route_eta(
         return True, clock, bracket
     if not settings.default_speed_kmh:
         return True, None, bracket
-    travelled = (settings.default_speed_kmh * max(0.0, position.age_minutes)) / 60.0
+    age = 0 if position.at_station or position.run == "at" else max(0.0, position.age_minutes)
+    travelled = settings.default_speed_kmh * age / 60.0
     remaining = ahead_km - travelled
     return True, (remaining / settings.default_speed_kmh) * 60.0, bracket
 

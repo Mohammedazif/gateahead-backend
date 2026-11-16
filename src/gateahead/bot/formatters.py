@@ -84,6 +84,7 @@ def predict_text(scan: dict) -> str:
         return friendly_error(str(scan["error"]))
     approaching = scan.get("approaching") or []
     passed = scan.get("passed") or []
+    awaiting = scan.get("awaiting_update") or []
     gone = {row["train"] for row in passed}
     sightings = [s for s in (scan.get("sightings") or []) if s.get("age", 0) < 45]
     live = [s for s in sightings if not s.get("passed_local") and s["number"] not in gone]
@@ -91,6 +92,25 @@ def predict_text(scan: dict) -> str:
     for row in approaching:
         grouped.setdefault(row["train"], []).append(row)
     lines = ["<b>Live trains</b>"]
+    coverage = scan.get("coverage") or {}
+    pending = coverage.get("pending_live", 0)
+    discovery_unavailable = coverage.get("unavailable_discovery", 0)
+    incomplete = any(coverage.get(key, 0) for key in (
+        "unavailable_discovery", "pending_live", "missing_or_stale_routes", "unavailable_live"))
+    if discovery_unavailable:
+        lines.append("Some train searches could not be completed. Coverage is incomplete.")
+    if pending:
+        lines.append(f"{coverage.get('live_checked', 0)} of {coverage.get('live_candidates', 0)} train checks completed. {pending} still pending; check again to continue.")
+    elif coverage.get("missing_or_stale_routes"):
+        lines.append("Some train timetables are missing or need refreshing. Coverage is incomplete.")
+    elif coverage.get("unavailable_live"):
+        lines.append("Some services have no current running report. Coverage is incomplete.")
+    if awaiting:
+        lines.append("<b>Position update needed</b>")
+        for train in awaiting:
+            lines.append(f"• {h(train['number'])} {h(train.get('name') or '')}: last reported stopped at "
+                         f"{h(train.get('current') or 'the station')}, {round(train.get('age_min', 0))} min old.")
+        lines.append("Passage has not been confirmed. The barrier’s position is unknown.")
     if grouped:
         lines.append("")
         for number, rows in grouped.items():
@@ -107,11 +127,15 @@ def predict_text(scan: dict) -> str:
                     f"• {h(label)}: {gate_label(row['eta'], row.get('closes_in'))}, {row['from_you_km']:.1f} km from you"
                 )
             lines.append("")
+    elif awaiting:
+        lines.append("")
     elif live or passed:
-        lines.append("No train is close enough to close a crossing near you right now.")
+        lines.append("Other train estimates may be missing. The barrier’s position is unknown." if incomplete
+                     else "No train is close enough to close a crossing near you right now.")
         lines.append("")
     else:
-        lines.append("No live trains reported on this stretch right now.")
+        lines.append("No train estimates are available from the completed checks. The barrier’s position is unknown." if incomplete
+                     else "No live trains reported on this stretch right now.")
         return "\n".join(lines)
     if passed:
         lines.append("<b>Just passed</b>")

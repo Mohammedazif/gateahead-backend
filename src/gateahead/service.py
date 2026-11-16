@@ -1,21 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
+import logging
+from dataclasses import dataclass, replace
 from datetime import datetime
 from math import cos, hypot, radians
 
 import aiohttp
 
 from gateahead.clusters import cluster_crossings
+from gateahead.clock import INDIA
 from gateahead.config import Settings
-from gateahead.erail import known_train_names, station_rows, train_rows
+from gateahead.erail import TrainRows, known_train_names, station_rows, train_rows
 from gateahead.geo import km, stitch_rail
-from gateahead.live import LiveLook, fetch_live, position_from_lts
+from gateahead.live import LiveLook, cached_live, fetch_live, position_from_lts
 from gateahead.models import Crossing, Halt, PinCheck, SavedRoute, Station, TrainPosition, User
 from gateahead.osm import OsmAround, OsmClient
 from gateahead.gatecall import crossing_call as _crossing_eta
 from gateahead.gatecall import passed_ago
+from gateahead.gatecall import awaiting_report, standing
 from gateahead.predict import JUST_PASSED_MIN, closes_in
 from gateahead.scene import build_scene
 from gateahead.store import Store
@@ -26,20 +29,36 @@ from gateahead.timetable import (
     fetch_timetable,
     list_status,
     locate_stops,
+    passage_delta,
     scheduled_position,
     waiting_position,
 )
 from gateahead.verify import check_pin
 
 _FETCH = 16
-_DISCOVER_CAP = 30
 _DISCOVER_BATCH = 10
-_CACHED_DISCOVER = 5
 _DISCOVERY_RADIUS_KM = 150
-_ROUTE_HOURS = 24 * 7
 _ROUTE_FETCH = 4
 _NEAR_KM = 2.0
 _SAME_GATE_M = 40.0
+_log = logging.getLogger(__name__)
+
+
+@dataclass
+class PositionBatch:
+    numbers: list[str]
+    positions: list[TrainPosition]
+    routes: dict[str, SavedRoute]
+    coverage: dict
+
+    def __iter__(self):
+        return iter((self.numbers, self.positions, self.routes))
+
+
+class TrainDiscovery(list[str]):
+    def __init__(self, numbers=(), *, unavailable: int = 0):
+        super().__init__(numbers)
+        self.unavailable = unavailable
 
 
 def merge_saved_crossings(osm: list[Crossing], saved: list[Crossing]) -> list[Crossing]:
@@ -161,9 +180,10 @@ class GateAhead:
         crossing = next((item for item in mapped.crossings if item.id == crossing_id), None)
         if crossing is None:
             return {"available": False, "error": "crossing_not_found", "rail": [], "trains": [], "passed": []}
-        _numbers, positions, routes = await self._positions(mapped.stations, lat, lon)
+        batch = await self._positions(mapped.stations, lat, lon)
+        _numbers, positions, routes = batch
         stations = known_points(mapped.stations, self.store.halts_near(lat, lon, 80, 500))
-        return build_scene(
+        body = build_scene(
             crossing,
             mapped.rails,
             positions,
@@ -171,29 +191,32 @@ class GateAhead:
             self.settings,
             {number: route.stops for number, route in routes.items()},
         )
+        body["coverage"] = getattr(batch, "coverage", {"status": "unknown"})
+        return body
 
     async def _positions(
         self, stations: list[Station], lat: float, lon: float
-    ) -> tuple[list[str], list[TrainPosition], dict[str, SavedRoute]]:
-        now = datetime.now()
+    ) -> PositionBatch:
+        now = datetime.now(INDIA)
         regional = self.store.halts_near(lat, lon, _DISCOVERY_RADIUS_KM, 800, "station")
         discovery_stations = _discovery_stations(stations, regional, lat, lon)
         numbers = await self._discover_trains(discovery_stations)
-        nearby_routes = self.store.route_numbers_near(lat, lon, self.settings.nearby_radius_m / 1000, _ROUTE_HOURS)
-        cached = self._cached_routes(list(dict.fromkeys(numbers + nearby_routes)))
-        extras = [number for number in nearby_routes if number not in numbers and number in cached
-                  and classify_passage(cached[number].stops, cached[number].run_days, lat, lon, now) in {"hot", "cold"}]
-        extras.sort(key=lambda number: _clock_rank(
-            min(cached[number].stops, key=lambda stop: km((lat, lon), (stop.lat, stop.lon)) if stop.lat is not None and stop.lon is not None else float("inf")).depart_min % 1440,
-            now.hour * 60 + now.minute,
-        ))
-        numbers = list(dict.fromkeys(extras[:_CACHED_DISCOVER] + numbers))[:_DISCOVER_CAP]
+        unavailable_discovery = getattr(numbers, "unavailable", 0)
+        # Pad the coarse route-leg lookup for bends between published points.
+        # Crossing placement still checks the nearby rail and the full route.
+        nearby_routes = self.store.route_numbers_near(lat, lon, self.settings.nearby_radius_m / 1000 + 25, None)
+        numbers = list(dict.fromkeys(nearby_routes + numbers))
+        self.store.remember_train_candidates(numbers)
+        cached = self._cached_routes(numbers)
+        fresh_looks = {number: look for number in numbers
+                       if (look := cached_live(number, getattr(self, "snapshots", None))) is not None}
         self.store.remember_train_names(known_train_names(numbers))
         hot: list[str] = []
         cold: list[str] = []
         for number in numbers:
             route = cached.get(number)
-            if route is None:
+            # A current moving report takes precedence over schedule eligibility.
+            if route is None or (number in fresh_looks and fresh_looks[number].moving is not None):
                 hot.append(number)
                 continue
             kind = classify_passage(route.stops, route.run_days, lat, lon, now)
@@ -205,17 +228,33 @@ class GateAhead:
 
         async def one(number: str) -> tuple[str, LiveLook]:
             async with semaphore:
-                return number, await fetch_live(self.session, number, self.snapshots)
+                try:
+                    return number, await fetch_live(self.session, number, self.snapshots)
+                except (aiohttp.ClientError, TimeoutError, ValueError):
+                    _log.warning("Live report unavailable for %s", number, exc_info=True)
+                    return number, LiveLook(None, "", False)
 
-        looks = dict(await asyncio.gather(*[one(number) for number in hot])) if hot else {}
+        looks = {number: fresh_looks[number] for number in hot if number in fresh_looks}
+        pending = [number for number in hot if number not in looks]
+        check_times = self.store.live_check_times(pending)
+
+        def priority(number: str) -> tuple[float, float]:
+            route = cached.get(number)
+            delta = passage_delta(route.stops, route.run_days, lat, lon, now) if route else None
+            return check_times.get(number, 0), abs(delta) if delta is not None else float("inf")
+
+        pending.sort(key=priority)
+        selected = pending[:self.settings.live_check_budget]
+        looks.update(await asyncio.gather(*[one(number) for number in selected]))
+        self.store.record_live_checks(selected)
         wanted = [
             number
             for number in hot
-            if looks[number].moving is not None or not looks[number].finished
+            if number in looks and (looks[number].moving is not None or not looks[number].finished)
         ]
         routes = {number: cached[number] for number in cold if number in cached}
         routes.update(await self._routes(wanted))
-        now = datetime.now()
+        now = datetime.now(INDIA)
         positions = positions_from_looks(wanted, looks, routes, now)
         for number in cold:
             route = routes.get(number)
@@ -228,7 +267,20 @@ class GateAhead:
         self.store.remember_train_names({position.train_number: position.name for position in positions if position.name.strip()})
         names = self.store.train_names(numbers)
         positions = [name_position(position, names.get(position.train_number, ""), routes.get(position.train_number)) for position in positions]
-        return numbers, positions, routes
+        return PositionBatch(numbers, positions, routes, {
+            "status": "partial",
+            "national_coverage_verified": False,
+            "candidates": len(numbers),
+            "live_candidates": len(hot),
+            "live_checked": len(looks),
+            "live_reports": sum(look.moving is not None for look in looks.values()),
+            "unavailable_live": sum(look.moving is None and not look.finished for look in looks.values()),
+            "unavailable_discovery": unavailable_discovery,
+            "pending_live": len(pending) - len(selected),
+            "missing_or_stale_routes": sum(number not in cached and number not in routes for number in numbers),
+            "scheduled_candidates": len(cold),
+            "limited": len(pending) > len(selected),
+        })
 
     async def predict_here(self, lat: float, lon: float) -> dict:
         mapped = await self.map_around(lat, lon)
@@ -244,10 +296,12 @@ class GateAhead:
         if not focus:
             nearest = sorted(clusters, key=lambda cluster: km((lat, lon), (cluster.lat, cluster.lon)))
             focus = {cluster.id for cluster in nearest[:3]}
-        numbers, positions, routes = await self._positions(stations, lat, lon)
+        batch = await self._positions(stations, lat, lon)
+        numbers, positions, routes = batch
         approaching: list[dict] = []
         gate_predictions: list[dict] = []
         just_passed: list[dict] = []
+        awaiting: list[dict] = []
         sightings: list[dict] = []
         local_codes = {s.code.upper() for s in stations}
         station_xy = known_points(stations, self.store.halts_near(lat, lon, 80, 500))
@@ -266,14 +320,20 @@ class GateAhead:
             best: tuple[float, object, str | None] | None = None
             hits = []
             gone = []
+            waiting_ids = []
             for cluster in clusters:
                 etas = []
                 gate_ids = []
                 agos = []
+                cluster_waiting = False
                 for crossing in cluster.crossings:
                     call = _crossing_eta(
                         position, crossing, rails, station_xy, self.settings, stops, chains.get(crossing.id)
                     )
+                    if call.awaiting_update:
+                        waiting_ids.append(crossing.id)
+                        cluster_waiting = True
+                        continue
                     ago = passed_ago(call)
                     if ago is not None:
                         agos.append(ago)
@@ -287,9 +347,10 @@ class GateAhead:
                             "id": crossing.id, "train": position.train_number, "name": position.name,
                             "eta": round(call.eta, 1), "closes_in": round(closes_in(call.eta, self.settings), 1),
                             "status": status, "basis": call.source, "age_min": round(position.age_minutes, 1),
+                            "at_station": standing(position),
                         })
                 if not etas:
-                    if agos and cluster.id in focus and min(agos) <= JUST_PASSED_MIN:
+                    if agos and not cluster_waiting and cluster.id in focus and min(agos) <= JUST_PASSED_MIN:
                         gone.append((cluster, min(agos)))
                     continue
                 soon, bracket, status, basis = min(etas, key=lambda item: item[0])
@@ -298,7 +359,9 @@ class GateAhead:
                 hits.append((cluster, soon, bracket, status, basis, gate_ids))
                 if best is None or soon < best[0]:
                     best = (soon, cluster, bracket)
-            passed_local = False if hits else bool(gone) or _passed_local(position, lat, lon, local_codes)
+            if waiting_ids:
+                awaiting.append(awaiting_report(position, waiting_ids))
+            passed_local = False if hits or waiting_ids else bool(gone) or _passed_local(position, lat, lon, local_codes)
             if hits or _on_this_stretch(position, lat, lon, local_codes):
                 sightings.append(_sighting(position, best[0] if best else None, passed_local))
             for cluster, soon, bracket, status, basis, gate_ids in hits:
@@ -312,7 +375,7 @@ class GateAhead:
                     "status": status,
                     "basis": basis,
                     "age_min": round(position.age_minutes, 1),
-                    "at_station": position.at_station,
+                    "at_station": standing(position),
                     "current": position.current_name,
                     "from_you_km": round(km((lat, lon), (cluster.lat, cluster.lon)), 2),
                     "lat": cluster.lat,
@@ -339,16 +402,18 @@ class GateAhead:
         approaching.sort(key=lambda row: row["eta"])
         just_passed.sort(key=lambda row: row["ago"])
         return {
-            "generated_at": datetime.now().astimezone().isoformat(),
+            "generated_at": datetime.now(INDIA).isoformat(),
             "refresh_after_seconds": 120,
             "crossings": len(crossings),
             "stations": [s.code for s in stations[:4]],
-            "checked": len(numbers),
+            "checked": getattr(batch, "coverage", {}).get("live_checked", len(numbers)),
             "running": len(positions),
             "gate_predictions": sorted(gate_predictions, key=lambda row: row["eta"]),
             "approaching": approaching,
             "passed": just_passed,
+            "awaiting_update": awaiting,
             "sightings": sightings,
+            "coverage": getattr(batch, "coverage", {"status": "unknown"}),
         }
 
     async def _discover_trains(self, stations: list[Station]) -> list[str]:
@@ -359,28 +424,36 @@ class GateAhead:
         for number in numbers:
             if not number or number in found:
                 continue
-            cached = self.store.load_route(number, _ROUTE_HOURS)
+            cached = self.store.load_route(number, self.settings.route_max_age_hours)
             if cached is not None:
                 found[number] = SavedRoute(self._pin_route(cached.stops), cached.run_days)
         return found
 
     async def _routes(self, numbers: list[str]) -> dict[str, SavedRoute]:
+        self.store.remember_train_candidates(numbers)
         found = self._cached_routes(numbers)
         missing: list[str] = []
         seen = set(found)
         for number in numbers:
-            if number and number not in seen:
+            if number and number not in seen and self.store.route_refresh_allowed(number):
                 seen.add(number)
                 missing.append(number)
         semaphore = asyncio.Semaphore(_ROUTE_FETCH)
 
         async def one(number: str) -> tuple[str, SavedRoute | None]:
             async with semaphore:
-                stops, run_days = await fetch_timetable(self.session, number)
-                if len(stops) < 2:
+                try:
+                    stops, run_days = await fetch_timetable(self.session, number)
+                except (aiohttp.ClientError, TimeoutError, ValueError):
+                    _log.warning("Timetable unavailable for %s", number, exc_info=True)
+                    self.store.record_route_failure(number)
                     return number, None
+                if len(stops) < 2:
+                    self.store.record_route_failure(number)
+                    return number, None
+                stops = self._pin_route(stops)
                 self.store.save_route(number, stops, run_days)
-                return number, SavedRoute(self._pin_route(stops), run_days)
+                return number, SavedRoute(stops, run_days)
 
         for number, route in await asyncio.gather(*[one(number) for number in missing]):
             if route is not None:
@@ -593,20 +666,29 @@ async def _discover_trains_from(
     now: datetime | None = None,
 ) -> list[str]:
     found: list[tuple[str, int | None]] = []
+    unavailable = 0
     # A service may stop at only one of the nearby stations. Between-station
     # queries alone omit it (for example 16512 at PAY, skipping ELM and TKQ).
     boards = _board_stations(stations)
     pairs = _pair_plan(stations)
     lookups = [(True, station.code, station.name) for station in boards] + [(False, origin, dest) for origin, dest in pairs]
+
+    async def lookup(board: bool, origin: str, dest: str):
+        try:
+            return await (station_rows(session, origin, dest) if board else train_rows(session, origin, dest))
+        except (aiohttp.ClientError, TimeoutError, ValueError):
+            _log.warning("Train discovery unavailable for %s", origin, exc_info=True)
+            return TrainRows(unavailable=True)
+
     for start in range(0, len(lookups), _DISCOVER_BATCH):
         chunk = lookups[start : start + _DISCOVER_BATCH]
-        lists = await asyncio.gather(*[station_rows(session, origin, dest) if board else train_rows(session, origin, dest)
-                                      for board, origin, dest in chunk])
+        lists = await asyncio.gather(*[lookup(board, origin, dest) for board, origin, dest in chunk])
         for rows in lists:
+            unavailable += bool(getattr(rows, "unavailable", False))
             found.extend(rows)
-    moment = now or datetime.now()
+    moment = now or datetime.now(INDIA)
     ordered = _order_due(found, moment.hour * 60 + moment.minute)
-    return ordered[:_DISCOVER_CAP]
+    return TrainDiscovery(ordered, unavailable=unavailable)
 
 
 def _train_is_here(position: TrainPosition, lat: float, lon: float, local_codes: set[str]) -> bool:

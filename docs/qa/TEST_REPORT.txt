@@ -1,0 +1,205 @@
+Repository copy of the combined-workspace audit.
+
+Run `.venv/bin/python -m pytest -q` from the backend repository to run its
+299 backend and 68 simulator tests. Website and phone checks run in their
+respective repositories. Paths under /tmp identify local audit evidence;
+those temporary logs/screenshots are not part of this source checkout.
+
+GateAhead functional and reliability audit — 16 November 2026
+
+Result: all defined automated and controlled browser scenarios passed.
+This is a documented test scope, not a guarantee that every possible real-world
+condition has been tested. QA_SCENARIOS.csv lists every executed test/scenario
+and the remaining gaps, with evidence paths.
+
+Final verification
+
+- 367 Python tests: 299 backend and 68 simulator tests.
+- 89 web unit/component tests; TypeScript check and production build passed.
+- 95 standard Flutter controller/widget tests; static analysis clean.
+- Total: 551 automated tests passed.
+- 98 browser scenarios: 5 crossing workflows, 40 desktop/phone user journeys,
+  48 paired condition cases, and 5 production/offline checks.
+- Native Linux debug build passed. Startup, map rendering, Settings, and search
+  were opened and visually inspected in an isolated Xvfb display.
+- Playwright 1.62.1 is pinned locally; browser checks run without referencing
+  an installation from another project.
+
+The last live browser/API sample loaded 53 Payyanur-area crossings, checked
+13 trains, and reported 12 running. It also reported 5 unavailable discovery
+lookups and 5 unavailable live reports. The browser showed an incomplete-data
+notice and no uncaught JavaScript errors. These counts describe that sample,
+not complete train coverage. The normal API on port 8000 was restarted with its
+original arguments/environment to load all fixes; the site remains on 5173.
+
+User journeys exercised
+
+First visit: search by typing and keyboard, use GPS with permission granted or
+denied, recover through manual search, pick/cancel/confirm a map position, and
+avoid duplicate confirmations. Older search/GPS replies cannot change a newer
+choice.
+
+Returning commuter: save, name, rename, remove, reload, and reopen a crossing;
+copy a crossing link and open it; change city after an incoming shared link;
+reload the current choice. Invalid legacy storage does not crash startup.
+
+At the gate or on a train: compare Nearby, Trains, selected details, and map
+markers; follow opposing services independently; expire one report while another
+stays fresh; hold a stopped report; require a position update at eight minutes;
+recover when movement resumes; retain newer per-gate checks when navigating.
+
+Routine and interrupted use: switch places or gates while requests are pending;
+press Escape or Tab in dialogs; change themes; toggle automatic checking;
+restrict commute hours, including overnight/weekend boundaries; hide the page;
+go offline; retry after rate limits; submit, replace, expire, or retry a community
+report using controlled test endpoints.
+
+Failure and recovery pairs: online/offline, fresh/saved, valid/malformed,
+complete/partial discovery, visible/hidden, automatic/manual, moving/stopped,
+clock ahead/behind, normal/reduced motion, and graphics available/unavailable.
+Phone profiles include touch map gestures. GPS locations are emulated; actual
+hardware reception was not inferred from those tests.
+
+Important fixes verified
+
+1. Host timezone: the same train had ETA 15 minutes on an India-time host and
+   345 minutes on UTC. Railway scheduling/live clocks now explicitly use
+   UTC+05:30. Paired host tests verify equal ETAs, eligibility, Indian midnight,
+   operating weekdays, discovery priority, and absolute scene timestamps.
+
+2. Device/server clock differences: stopped reports could remain fresh forever
+   when a valid source timestamp was in the future. Predictions, details, and
+   map markers now use their original receipt anchor when clocks disagree
+   beyond the request window. Malformed source timestamps are rejected.
+
+3. Delayed intent: GPS replies/errors, stale autocomplete matches, saved/shared
+   gate targets, and dismissed scene replies could override newer choices.
+   Request/selection guards now preserve the latest user action.
+
+4. Persistence: changing city after opening a shared link could reload the old
+   city. Malformed saved gates, cached rows, timestamps, labels, and commute
+   clocks could break returning sessions. Current choices persist and damaged
+   entries are ignored without discarding valid stored data.
+
+5. Provider faults: malformed map responses could crash or become cached empty
+   maps. One failed train lookup could discard healthy services. Invalid map
+   geometry/tags and expected provider failures are isolated. Failed discovery
+   is counted per request and displayed in web, mobile, and Telegram responses.
+
+6. Cold-map deadline: three 30-second mirror attempts could outlast the browser
+   timeout. Mirrors now share 75 seconds, with bounded attempts and an actual
+   asynchronous deadline. Recovery on the last mirror, warm reuse, stale-cache
+   fallback, and cancellation are tested. No parallel mirror load was added.
+
+7. Parsing and offline fallback: malformed nested IDs/names, scene tracks,
+   motion, timestamps, and report responses could still reach UI consumers.
+   They now preserve valid saved results or produce a usable error. Failed
+   report submissions do not claim success or destroy the report dialog.
+
+8. Graphics: failure to create the map renderer blanked the whole website.
+   Place search, crossing lists, train checks, and reports now remain usable
+   with a clear map-unavailable message.
+
+9. Interaction: Escape in Settings/Report or map confirmation could close the
+   crossing behind it; keyboard focus could escape map confirmation. Closing
+   the top interaction now retains the underlying crossing, and confirmation
+   keeps keyboard focus inside it. Native sheets have the Material layer
+   required for their interactive rows and feedback.
+
+10. Stopped/passing estimates: stale stopped trains remain visible as Position
+    update needed and are not converted into passage by a countdown. Other
+    trains keep independent identity, timing, direction, and expiry. Inferred
+    near-gate timings do not claim the barrier is closed.
+
+11. Route geometry: sparse curved express legs can produce an explicitly
+    uncertain timetable estimate; a disconnected mapped parallel line cannot
+    falsely close the selected gate. There is no claim of occupied-track
+    confirmation from inferred geometry.
+
+12. Offline application shell: Vary: Origin headers made cached JavaScript/CSS
+    miss on offline reload, leaving a blank page. Known public shell files now
+    match within the active cache version. Real production offline reload,
+    navigation, cached asset delivery, and returning online pass.
+
+Simulation coverage
+
+Sixteen scenarios run with and without the real 90-second SQLite snapshot
+cache: 2,196 train checks. All 12 synthetic crossings are also checked in both
+travel directions before, during, and after passage: 168 additional checks.
+Source age is derived independently from the simulated provider and fetch
+clock. Mutation tests ensure that omissions, invented countdowns, invalid
+estimates, or making all trains unresolved cannot falsely pass the judge.
+The synthetic clock now preserves the same epoch across timezones.
+
+Repeat the checks
+
+From the workspace root:
+  backend/.venv/bin/python -m pytest -q
+  (cd frontend && npm ci && npm test && npm run build)
+  (cd mobile && flutter test && flutter analyze)
+  (cd mobile && flutter build linux --debug)
+
+With Chromium installed and the development server running:
+  (cd frontend && npx playwright install chromium)
+  (cd frontend && npm run test:browser)
+
+With the production build served by npm run preview:
+  (cd frontend && npm run test:offline)
+
+BROWSER_BASE_URL and BROWSER_ARTIFACTS select the browser target and evidence
+folder. The production/offline runner defaults to port 4173. The sandboxed
+Flutter helper remains available when normal SDK/socket access is restricted:
+  python3 mobile/tools/check-sandboxed.py
+
+Remaining verification limits
+
+Physical Android/iOS installation, GPS hardware, and OS-specific background
+behavior remain unverified. Chromium and native Linux were exercised; Firefox,
+Safari, and other engines were not. No production load/SLA benchmark or formal
+security penetration audit was performed. Controlled paired scenarios are not
+a production traffic experiment with real users.
+
+One live area and synthetic corridors do not establish nationwide completeness,
+freight/diversion coverage, or observed physical barrier state. Upstream feeds
+can still be unavailable or incomplete; the app now reports that uncertainty.
+No deployment or live community-report test submissions were performed.
+
+The Python suite retains four existing FastAPI lifecycle deprecation warnings.
+The web build retains its existing bundle-size warning; Linux compilation has
+existing native-library/CMake notices. These checks completed successfully.
+
+Evidence
+
+Case inventory: QA_SCENARIOS.csv
+Python: /tmp/gateahead-full-audit-python.log
+Python inventory: /tmp/gateahead-audit-python-cases.txt
+Web: /tmp/gateahead-web-deep-after.log
+Web build: /tmp/gateahead-web-deep-build.log
+Browser aggregate command: 3/3 suites passed; each exited 0.
+Browser suite: /tmp/gateahead-browser-aggregate-final.log
+Browser aggregate report: /tmp/gateahead-browser-audit/results.json
+Browser workflow: /tmp/gateahead-browser-audit/crossings/results.json
+Browser journeys: /tmp/gateahead-browser-audit/journeys/results.json
+Browser condition pairs: /tmp/gateahead-browser-audit/conditions/results.json
+Production offline: /tmp/gateahead-browser-offline-release/results.json
+Mobile machine report: /tmp/gateahead-mobile-audit-results.jsonl
+Mobile analysis: /tmp/gateahead-mobile-deep-final-analysis.log
+Native build: /tmp/gateahead-mobile-linux-build.log
+Native startup: /tmp/gateahead-native-linux.log
+Live smoke: /tmp/gateahead-live-release-final.json
+
+Representative screenshots:
+  /tmp/gateahead-live-release-final.png
+  /tmp/gateahead-native-linux.png
+  /tmp/gateahead-native-linux-settings.png
+  /tmp/gateahead-native-linux-search.png
+  /tmp/gateahead-browser-offline-release/offline-phone.png
+
+Original failing reproductions remain in /tmp for review:
+  /tmp/gateahead-host-timezone-reproduction.json
+  /tmp/gateahead-browser-journeys-before-fixes.log
+  /tmp/gateahead-browser-incoming-before/results.json
+  /tmp/gateahead-browser-state-matrix-before.log
+  /tmp/gateahead-api-boundaries-before.log
+  /tmp/gateahead-mobile-deep-reproductions.log
+  /tmp/gateahead-mobile-clock-reproduction.log

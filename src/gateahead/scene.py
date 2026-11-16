@@ -4,8 +4,8 @@ from gateahead.config import Settings
 from gateahead.clusters import gate_label
 from gateahead.geo import along_route, stitch_rail
 from gateahead.models import Crossing, RouteStop, TrainPosition
-from gateahead.gatecall import crossing_call, passed_ago, standing
-from gateahead.predict import JUST_PASSED_MIN, closes_in
+from gateahead.gatecall import awaiting_report, crossing_call, passed_ago, standing
+from gateahead.predict import JUST_PASSED_MIN, REPORT_FRESH_MIN, closes_in
 from gateahead.timetable import BEND_HALF_KM, list_status
 
 _DRAW_KM = 1.5
@@ -30,6 +30,7 @@ def build_scene(
         "rail": [],
         "trains": [],
         "passed": [],
+        "awaiting_update": [],
     }
     bend = stitch_rail(rails, crossing.coords, half_km=BEND_HALF_KM)
     if not bend:
@@ -39,6 +40,9 @@ def build_scene(
     for position in positions:
         stops = (routes or {}).get(position.train_number)
         chosen = crossing_call(position, crossing, rails, stations, settings, stops, bend)
+        if chosen.awaiting_update:
+            body["awaiting_update"].append(awaiting_report(position, [crossing.id]))
+            continue
         status = None
         if chosen.eta is not None:
             status = list_status(chosen.eta, chosen.slack, settings, chosen.source == "timetable")
@@ -57,6 +61,8 @@ def build_scene(
             "age_min": round(position.age_minutes, 1),
             "snapshot_at": position.as_of.timestamp(),
             "movement": "stopped" if standing(position) else "moving",
+            "current": position.current_name or position.last_station,
+            "last_station": position.last_station,
         }
         motion = _motion(position, bend, stations, stops or [], settings) if chosen.slack <= 3 else None
         if motion is not None:
@@ -122,7 +128,7 @@ def _motion(
     This is an estimated position, not a replay or a GPS observation. A short
     validity window prevents a cached scene from drifting indefinitely.
     """
-    if standing(position) or position.age_minutes >= 8 or settings.default_speed_kmh <= 0:
+    if standing(position) or position.age_minutes >= REPORT_FRESH_MIN or settings.default_speed_kmh <= 0:
         return None
     points = {stop.code.upper(): (stop.lat, stop.lon) for stop in stops if stop.lat is not None and stop.lon is not None}
     points.update(stations)
@@ -145,5 +151,5 @@ def _motion(
     return {
         "direction": direction,
         "speed_kmh": settings.default_speed_kmh,
-        "valid_for_sec": (8 - max(0, position.age_minutes)) * 60,
+        "valid_for_sec": (REPORT_FRESH_MIN - max(0, position.age_minutes)) * 60,
     }

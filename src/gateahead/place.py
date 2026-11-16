@@ -43,15 +43,25 @@ async def lookup_place(session: aiohttp.ClientSession, lat: float, lon: float) -
     cached = _cache.get(key)
     if cached and cached[0] > time.monotonic():
         return cached[1]
-    inflight = _inflight.get(key)
-    if inflight:
-        return await inflight
-    task = asyncio.create_task(_fetch(session, lat, lon))
-    _inflight[key] = task
-    try:
-        name = await task
-    finally:
+    task = _inflight.get(key)
+    if task is None:
+        task = asyncio.create_task(_lookup(session, lat, lon, key))
+        _inflight[key] = task
+        task.add_done_callback(lambda done: _finished(key, done))
+    return await asyncio.shield(task)
+
+
+def _finished(key: tuple[int, int], task: asyncio.Task[str | None]) -> None:
+    if _inflight.get(key) is task:
         _inflight.pop(key, None)
+    if not task.cancelled():
+        task.exception()
+
+
+async def _lookup(
+    session: aiohttp.ClientSession, lat: float, lon: float, key: tuple[int, int]
+) -> str | None:
+    name = await _fetch(session, lat, lon)
     _cache[key] = (time.monotonic() + (_SUCCESS_TTL if name else _MISS_TTL), name)
     if len(_cache) > 400:
         oldest = min(_cache, key=lambda item: _cache[item][0])

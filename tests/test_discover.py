@@ -155,7 +155,7 @@ def test_empty_discovery_still_checks_a_train_passing_between_distant_stops(tmp_
 
     class Clock(datetime):
         @classmethod
-        def now(cls):
+        def now(cls, tz=None):
             return datetime(2026, 11, 16, 17, 14)
 
     monkeypatch.setattr(service_module, "datetime", Clock)
@@ -190,7 +190,7 @@ def test_cached_payyanur_route_survives_an_empty_provider_discovery(tmp_path, mo
 
     class Clock(datetime):
         @classmethod
-        def now(cls):
+        def now(cls, tz=None):
             return moment
 
     monkeypatch.setattr(service_module, "datetime", Clock)

@@ -11,6 +11,14 @@ _HEADERS = {
 }
 
 
+class TrainRows(list[tuple[str, int | None]]):
+    """Preserve list compatibility while distinguishing an unavailable lookup."""
+
+    def __init__(self, rows=(), *, unavailable: bool = False):
+        super().__init__(rows)
+        self.unavailable = unavailable
+
+
 def parse_train_rows(body: str) -> list[tuple[str, int | None]]:
     rows: list[tuple[str, int | None]] = []
     seen: set[str] = set()
@@ -110,13 +118,13 @@ _cache: dict[tuple[str, str], tuple[float, list[tuple[str, int | None]]]] = {}
 _names: dict[str, str] = {}
 
 
-async def station_rows(session: aiohttp.ClientSession, code: str, name: str) -> list[tuple[str, int | None]]:
+async def station_rows(session: aiohttp.ClientSession, code: str, name: str, *, refresh: bool = False) -> list[tuple[str, int | None]]:
     code = code.strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{1,6}", code):
         return []
     key = (code, code)
     hit = _cache.get(key)
-    if hit and time.monotonic() - hit[0] < _TTL:
+    if not refresh and hit and time.monotonic() - hit[0] < _TTL:
         return hit[1]
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or code.lower()
     station = f"{slug}-{code}"
@@ -124,15 +132,17 @@ async def station_rows(session: aiohttp.ClientSession, code: str, name: str) -> 
     try:
         async with session.get(url, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=20)) as response:
             if response.status != 200:
-                return []
+                return TrainRows(unavailable=True)
             rows, names = parse_station_board(await response.text())
-    except (aiohttp.ClientError, TimeoutError):
-        return []
+    except (aiohttp.ClientError, TimeoutError, ValueError):
+        return TrainRows(unavailable=True)
     # A changed/unavailable HTML layout must not become a cached empty board.
     if rows:
         _cache[key] = (time.monotonic(), rows)
         _names.update(names)
-    return rows
+    # Without parseable departures, the page may still be loading or its
+    # schema may have changed. It cannot establish an empty railway line.
+    return rows if rows else TrainRows(unavailable=True)
 
 
 async def train_rows(
@@ -155,12 +165,16 @@ async def train_rows(
     try:
         async with session.get(url, params=params, headers=_HEADERS, timeout=timeout) as response:
             if response.status != 200:
-                return []
+                return TrainRows(unavailable=True)
             body = await response.text()
             rows = parse_train_rows(body)
+            # The provider's delimiter-only body is an identifiable empty
+            # response. Other unparseable successful bodies remain unknown.
+            if not rows and not ("~" in body and not body.strip("~^ \t\r\n")):
+                return TrainRows(unavailable=True)
             _names.update(parse_train_names(body))
-    except (aiohttp.ClientError, TimeoutError):
-        return []
+    except (aiohttp.ClientError, TimeoutError, ValueError):
+        return TrainRows(unavailable=True)
     _cache[key] = (now, rows)
     return rows
 

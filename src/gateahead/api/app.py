@@ -61,6 +61,11 @@ async def health() -> dict:
     return {"ok": True}
 
 
+@app.get("/coverage")
+async def coverage() -> dict:
+    return _store.catalog_status(_settings.route_max_age_hours)
+
+
 @app.get("/cities")
 async def cities(q: str = Query(""), limit: int = Query(8, ge=1, le=20)) -> dict:
     query = " ".join(q.split())
@@ -75,7 +80,10 @@ async def cities(q: str = Query(""), limit: int = Query(8, ge=1, le=20)) -> dict
 
 
 @app.get("/place")
-async def place(lat: float = Query(...), lon: float = Query(...)) -> dict:
+async def place(
+    lat: float = Query(..., ge=-90, le=90, allow_inf_nan=False),
+    lon: float = Query(..., ge=-180, le=180, allow_inf_nan=False),
+) -> dict:
     assert _session is not None
     return {"name": await lookup_place(_session, lat, lon)}
 
@@ -106,9 +114,9 @@ def _catalog_meta() -> dict:
 
 @app.get("/halts")
 async def halts(
-    lat: float | None = Query(None),
-    lon: float | None = Query(None),
-    km: float = Query(25),
+    lat: float | None = Query(None, ge=-90, le=90, allow_inf_nan=False),
+    lon: float | None = Query(None, ge=-180, le=180, allow_inf_nan=False),
+    km: float = Query(25, allow_inf_nan=False),
     q: str = Query(""),
     kind: str = Query(""),
     offset: int = Query(0, ge=0),
@@ -161,7 +169,10 @@ async def halt(code: str) -> dict:
 
 
 @app.get("/gates")
-async def gates(lat: float = Query(...), lon: float = Query(...)) -> dict:
+async def gates(
+    lat: float = Query(..., ge=-90, le=90, allow_inf_nan=False),
+    lon: float = Query(..., ge=-180, le=180, allow_inf_nan=False),
+) -> dict:
     assert _service is not None
     items, error = await _service.nearby(lat, lon)
     if error:
@@ -195,7 +206,11 @@ def _limit(request: Request, bucket: str = "predictions", cap: int = _LIMIT) -> 
 
 
 @app.get("/predict")
-async def predict(request: Request, lat: float = Query(...), lon: float = Query(...)) -> dict:
+async def predict(
+    request: Request,
+    lat: float = Query(..., ge=-90, le=90, allow_inf_nan=False),
+    lon: float = Query(..., ge=-180, le=180, allow_inf_nan=False),
+) -> dict:
     _limit(request)
     assert _service is not None
     return await _service.predict_here(lat, lon)
@@ -204,8 +219,8 @@ async def predict(request: Request, lat: float = Query(...), lon: float = Query(
 @app.get("/scene")
 async def scene(
     request: Request,
-    lat: float = Query(...),
-    lon: float = Query(...),
+    lat: float = Query(..., ge=-90, le=90, allow_inf_nan=False),
+    lon: float = Query(..., ge=-180, le=180, allow_inf_nan=False),
     crossing_id: str = Query(...),
 ) -> dict:
     _limit(request)

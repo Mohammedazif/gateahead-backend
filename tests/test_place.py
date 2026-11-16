@@ -57,6 +57,38 @@ def test_lookup_keeps_a_miss_from_retrying_immediately():
     assert session.calls == 1
 
 
+def test_cancelled_place_request_keeps_the_shared_lookup_and_cache(monkeypatch):
+    import pytest
+    import gateahead.place as place
+
+    async def run():
+        started, finish = asyncio.Event(), asyncio.Event()
+        calls = 0
+
+        async def fetch(session, lat, lon):
+            nonlocal calls
+            calls += 1
+            started.set()
+            await finish.wait()
+            return "Mominpura, Nagpur"
+
+        monkeypatch.setattr(place, "_fetch", fetch)
+        abandoned = asyncio.create_task(lookup_place(None, 21.1458, 79.0882))
+        await started.wait()
+        kept = asyncio.create_task(lookup_place(None, 21.1458, 79.0882))
+        await asyncio.sleep(0)
+        abandoned.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await abandoned
+        finish.set()
+        assert await kept == "Mominpura, Nagpur"
+        assert await lookup_place(None, 21.1458, 79.0882) == "Mominpura, Nagpur"
+        assert calls == 1
+        assert place._inflight == {}
+
+    asyncio.run(run())
+
+
 class _Session:
     def __init__(self, payload: dict) -> None:
         self.payload = payload

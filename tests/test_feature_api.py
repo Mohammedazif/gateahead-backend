@@ -70,3 +70,65 @@ def test_predictions_and_scenes_share_a_limit_and_return_retry_after(feature_api
             assert (await client.get("/reports", params={"crossing_id": "osm:1"})).status_code == 200
 
     asyncio.run(run())
+
+
+def test_catalog_coverage_reads_no_upstream_data(feature_api, tmp_path, monkeypatch):
+    from gateahead.store import Store
+
+    api, service = feature_api
+    store = Store(tmp_path / "catalog.db")
+    store.remember_train_candidates(["16512", "16513"])
+    monkeypatch.setattr(api, "_store", store)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://test") as client:
+            response = await client.get("/coverage")
+            assert response.status_code == 200
+            assert response.json()["known_trains"] == 2
+            assert response.json()["missing_routes"] == 2
+            assert response.json()["national_coverage_verified"] is False
+            assert service.prediction_calls == 0
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("endpoint", ["/place", "/halts", "/gates", "/predict", "/scene"])
+@pytest.mark.parametrize("field,value", [
+    ("lat", "91"), ("lat", "-91"), ("lon", "181"), ("lon", "-181"),
+    ("lat", "nan"), ("lon", "nan"), ("lat", "inf"), ("lon", "-inf"),
+])
+def test_location_endpoints_reject_invalid_coordinates_before_lookup(feature_api, endpoint, field, value):
+    api, service = feature_api
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://test") as client:
+            params = {"lat": "12.1", "lon": "75.2", "crossing_id": "osm:1", field: value}
+            response = await client.get(endpoint, params=params)
+            assert response.status_code == 422
+            assert service.prediction_calls == 0
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("radius", ["nan", "inf", "-inf"])
+def test_halt_radius_must_be_finite(feature_api, radius):
+    api, _service = feature_api
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://test") as client:
+            response = await client.get("/halts", params={"lat": 12.1, "lon": 75.2, "km": radius})
+            assert response.status_code == 422
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("lat,lon", [(-90, -180), (90, 180), (0, 0)])
+def test_coordinate_validation_keeps_valid_boundaries(feature_api, lat, lon):
+    api, _service = feature_api
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://test") as client:
+            response = await client.get("/predict", params={"lat": lat, "lon": lon})
+            assert response.status_code == 200
+
+    asyncio.run(run())

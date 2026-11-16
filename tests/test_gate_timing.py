@@ -48,16 +48,17 @@ def test_report_age_is_taken_off_once():
     assert call.eta is not None and abs(call.eta - 18) < 0.6
 
 
-def test_a_frozen_at_station_report_does_not_keep_the_train_coming():
+def test_a_frozen_at_station_report_needs_an_update_instead_of_inventing_passage():
     stops = parse_route_rows(_ROWS)
-    # "Arrived at B" was reported at 10:20; at 10:40 the on-time train passed the gate 8 minutes ago.
+    # A report at B never confirms departure, even after its predicted crossing time.
     stale = _train(
         last_station="BBB", next_station="CCC", at_station=True, run="at", covered_km=20,
         as_of=datetime(2026, 11, 16, 10, 40), age_minutes=20,
     )
     call = timetable_call(stops, stale, GATE)
     assert call.eta is None and call.placed is True
-    assert call.ago is not None and abs(call.ago - 8) < 0.6
+    assert call.ago is None
+    assert call.awaiting_update is True
 
 
 def test_a_train_that_ends_before_the_gate_never_closes_it():

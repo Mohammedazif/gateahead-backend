@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from dataclasses import dataclass, replace
@@ -9,6 +10,7 @@ from datetime import date, datetime, timedelta
 import aiohttp
 
 from gateahead.geo import interpolate, km
+from gateahead.clock import INDIA
 from gateahead.models import Direction, TrainPosition
 from gateahead.snapshots import SnapshotCache
 
@@ -39,6 +41,14 @@ class LiveLook:
 
 async def fetch_lts(session: aiohttp.ClientSession, train_number: str) -> dict | None:
     return (await fetch_live(session, train_number)).moving
+
+
+def cached_live(train_number: str, cache: SnapshotCache | None = None) -> LiveLook | None:
+    if cache is not None:
+        raw = cache.peek(f"live:{train_number}")
+        return LiveLook(raw["moving"], raw["notice"], raw["finished"], raw.get("fetched_at")) if raw else None
+    hit = _lts_cache.get(train_number)
+    return hit[1] if hit and time.monotonic() - hit[0] < _LTS_TTL else None
 
 
 async def fetch_live(
@@ -188,7 +198,9 @@ async def _fetch_lts_page(
     if match:
         try:
             payload = json.loads(match.group(1))
-            raw = payload.get("props", {}).get("pageProps", {}).get("ltsData")
+            for key in ("props", "pageProps", "ltsData"):
+                payload = payload.get(key) if isinstance(payload, dict) else None
+            raw = payload
         except json.JSONDecodeError:
             raw = None
     lts = _normalize_lts(raw)
@@ -232,11 +244,8 @@ def _next_in(info: object) -> str:
 
 
 def _covered_km(lts: dict) -> float | None:
-    try:
-        covered = float(lts.get("distance_from_source"))
-    except (TypeError, ValueError):
-        return None
-    if covered < 0 or covered > 5000:
+    covered = _float(lts.get("distance_from_source"))
+    if covered is None or covered < 0 or covered > 5000:
         return None
     return covered
 
@@ -246,7 +255,7 @@ def _left_km(lts: dict) -> int | None:
     covered = lts.get("distance_from_source")
     try:
         left = int(total) - int(covered)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     if left <= 0 or left > 5000:
         return None
@@ -293,7 +302,7 @@ def _normalize_lts(raw: object) -> dict | None:
 
 
 def position_from_lts(train_number: str, lts: dict, now: datetime | None = None) -> TrainPosition | None:
-    now = now or datetime.now()
+    now = now or datetime.now(INDIA)
     current_code = str(lts.get("current_station_code") or "").upper() or None
     if not current_code and lts.get("at_src"):
         current_code = str(lts.get("source") or "").upper() or None
@@ -302,7 +311,9 @@ def position_from_lts(train_number: str, lts: dict, now: datetime | None = None)
         if not current_code:
             return None
         coords = (0.0, 0.0)
-    upcoming_rows = lts.get("upcoming_stations") or []
+    upcoming_rows = lts.get("upcoming_stations")
+    if not isinstance(upcoming_rows, (list, tuple)):
+        upcoming_rows = []
     upcoming = tuple(
         str(row.get("station_code") or "").upper()
         for row in upcoming_rows
@@ -323,14 +334,14 @@ def position_from_lts(train_number: str, lts: dict, now: datetime | None = None)
     delay = lts.get("delay")
     try:
         delay_minutes = int(delay) if delay is not None and str(delay).strip() != "" else 0
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         delay_minutes = 0
     _reported, age = _report_age(lts, now)
     info = lts.get("next_stoppage_info") if isinstance(lts.get("next_stoppage_info"), dict) else {}
     platform_no = lts.get("platform_number")
     try:
         platform = str(int(platform_no)) if int(platform_no) > 0 else ""
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         platform = ""
     if status == "D":
         run = "departed"
@@ -388,7 +399,7 @@ def _track_span(lts: dict, upcoming_rows: list, ahead: float) -> float | None:
 def _coords(lts: dict) -> tuple[float, float] | None:
     lat = _float(lts.get("cur_stn_lat"))
     lon = _float(lts.get("cur_stn_lng"))
-    if lat is not None and lon is not None:
+    if lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180:
         return lat, lon
     return _pair(lts.get("travelling_from_lat_lng"))
 
@@ -397,7 +408,7 @@ def _pair(value: object) -> tuple[float, float] | None:
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         return None
     lat, lon = _float(value[0]), _float(value[1])
-    if lat is None or lon is None:
+    if lat is None or lon is None or not (-90 <= lat <= 90 and -180 <= lon <= 180):
         return None
     return lat, lon
 
@@ -406,17 +417,25 @@ def _float(value: object) -> float | None:
     if value is None or value == "":
         return None
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
         return None
+    return number if math.isfinite(number) else None
 
 
 def _report_age(lts: dict, now: datetime) -> tuple[datetime, float]:
     raw_age = lts.get("status_as_of_min")
-    if isinstance(raw_age, (int, float)):
-        age = max(0.0, float(raw_age))
+    if raw_age is None or raw_age == "":
+        return now, 0.0
+    age = _float(raw_age)
+    # An invalid supplied age cannot establish that the report is fresh.
+    if age is None:
+        age = 8.0
+    age = max(0.0, age)
+    try:
         return now - timedelta(minutes=age), age
-    return now, 0.0
+    except OverflowError:
+        return now - timedelta(minutes=8), 8.0
 
 
 def _station_etas(rows: list, now: datetime) -> tuple[tuple[str, datetime], ...]:
@@ -433,7 +452,7 @@ def _station_etas(rows: list, now: datetime) -> tuple[tuple[str, datetime], ...]
         if a_min is not None and str(a_min).strip() != "":
             try:
                 stamp = midnight + timedelta(minutes=int(a_min))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 stamp = None
         if stamp is not None:
             out.append((code, stamp))

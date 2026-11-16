@@ -21,6 +21,13 @@ class SnapshotCache:
         )
         self.pending: dict[str, asyncio.Task] = {}
 
+    def peek(self, key: str) -> dict | None:
+        row = self.db.execute(
+            "SELECT payload FROM provider_snapshots WHERE key = ? AND expires > ?",
+            (key, time.time()),
+        ).fetchone()
+        return json.loads(row[0]) if row and row[0] is not None else None
+
     async def get(self, key: str, ttl: float, fetch: Callable[[], Awaitable[dict]]) -> dict:
         task = self.pending.get(key)
         if task is None:

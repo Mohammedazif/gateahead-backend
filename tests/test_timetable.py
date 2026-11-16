@@ -1,4 +1,6 @@
 import sqlite3
+import math
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -57,6 +59,29 @@ def test_route_keeps_pass_throughs_and_rolls_the_day():
     assert [stop.code for stop in stops] == ["MAQ", "CHV", "PAY", "PPNS", "CLT"]
     assert stops[3].stops is False
     assert stops[4].arrive_min == 1440 + 60
+
+
+def test_nonfinite_timetable_distances_are_ignored():
+    for distance in ["nan", "inf", float("nan"), float("inf")]:
+        rows = _rows()
+        rows[1]["distance_from_source"] = distance
+        stops = parse_route_rows(rows)
+        assert [stop.code for stop in stops] == ["MAQ", "PAY"]
+        assert all(math.isfinite(stop.km) for stop in stops)
+
+
+def test_nonfinite_optional_timetable_number_does_not_abort_the_route():
+    rows = _rows()
+    rows[1]["halt"] = float("inf")
+    stops = parse_route_rows(rows)
+    assert len(stops) == 3
+    assert stops[1].halt_min == 0
+
+
+def test_malformed_provider_page_data_is_an_unavailable_timetable():
+    for payload in [None, [], {"props": []}, {"props": {"pageProps": "unavailable"}}]:
+        html = f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(payload)}</script>'
+        assert parse_schedule(html) == ([], "")
 
 
 def test_lateness_is_measured_from_the_clock_not_added_twice():

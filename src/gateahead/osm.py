@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import time
+import math
 from dataclasses import dataclass
 
 import aiohttp
@@ -19,6 +21,8 @@ OVERPASS_HEADERS = {
     "Accept": "application/json",
 }
 _CACHE_TTL = 900.0
+_LOOKUP_BUDGET = 75.0
+_ATTEMPT_TIMEOUT = 30.0
 _cache: dict[tuple[float, float, int], tuple[float, "OsmAround"]] = {}
 
 
@@ -51,14 +55,23 @@ def _around_query(lat: float, lon: float, radius_m: float) -> str:
 
 
 def parse_overpass(payload: dict, origin: tuple[float, float]) -> tuple[list[Crossing], list[Station], list[list[tuple[float, float]]], bool]:
-    elements = payload.get("elements") or []
+    if not isinstance(payload, dict) or not isinstance(payload.get("elements"), list) or payload.get("remark"):
+        raise ValueError("Map provider returned an incomplete response")
+    elements = payload["elements"]
     crossings: list[Crossing] = []
     stations: list[Station] = []
     rails: list[list[tuple[float, float]]] = []
     roads: list[tuple[str, list[tuple[float, float]]]] = []
     has_highway = False
     for el in elements:
+        if not isinstance(el, dict):
+            raise ValueError("Map provider returned an invalid element")
+        if el.get("tags") is not None and not isinstance(el["tags"], dict):
+            raise ValueError("Map provider returned invalid tags")
         tags = el.get("tags") or {}
+        if any(tags.get(key) is not None and not isinstance(tags[key], str)
+               for key in ("railway", "highway", "ref", "name", "name:en")):
+            raise ValueError("Map provider returned invalid tags")
         kind = el.get("type")
         railway = tags.get("railway", "")
         coords = _element_coords(el)
@@ -139,10 +152,10 @@ def _nearest_road(
 
 def _element_coords(el: dict) -> tuple[float, float] | None:
     if el.get("lat") is not None and el.get("lon") is not None:
-        return float(el["lat"]), float(el["lon"])
+        return _coordinates(el["lat"], el["lon"])
     center = el.get("center")
     if isinstance(center, dict) and center.get("lat") is not None and center.get("lon") is not None:
-        return float(center["lat"]), float(center["lon"])
+        return _coordinates(center["lat"], center["lon"])
     points = _geom_points(el.get("geometry"))
     if not points:
         return None
@@ -152,6 +165,17 @@ def _element_coords(el: dict) -> tuple[float, float] | None:
     )
 
 
+def _coordinates(lat: object, lon: object) -> tuple[float, float]:
+    try:
+        latitude, longitude = float(lat), float(lon)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Map provider returned invalid coordinates") from exc
+    if not (math.isfinite(latitude) and math.isfinite(longitude)
+            and -90 <= latitude <= 90 and -180 <= longitude <= 180):
+        raise ValueError("Map provider returned invalid coordinates")
+    return latitude, longitude
+
+
 def _geom_points(geom: object) -> list[tuple[float, float]]:
     if not isinstance(geom, list):
         return []
@@ -159,7 +183,7 @@ def _geom_points(geom: object) -> list[tuple[float, float]]:
     for point in geom:
         if not isinstance(point, dict) or point.get("lat") is None or point.get("lon") is None:
             continue
-        points.append((float(point["lat"]), float(point["lon"])))
+        points.append(_coordinates(point["lat"], point["lon"]))
     return points
 
 
@@ -175,30 +199,39 @@ class OsmClient:
         if cached and now - cached[0] < _CACHE_TTL:
             return cached[1]
         query = _around_query(lat, lon, radius_m)
-        timeout = aiohttp.ClientTimeout(total=30, sock_read=30)
+        deadline = now + _LOOKUP_BUDGET
         last_error = "map_busy"
         for url in OVERPASS_URLS:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            attempt = min(_ATTEMPT_TIMEOUT, remaining)
+            timeout = aiohttp.ClientTimeout(total=attempt, sock_read=attempt)
             try:
-                async with self.session.post(
-                    url,
-                    data={"data": query},
-                    headers=OVERPASS_HEADERS,
-                    timeout=timeout,
-                ) as response:
-                    if response.status in {429, 504, 502}:
-                        last_error = "map_busy"
-                        continue
-                    if response.status != 200:
-                        last_error = "map_unavailable"
-                        continue
-                    payload = await response.json(content_type=None)
+                # All mirrors share one deadline below the browser's 90-second
+                # request window. The outer timeout also bounds aiohttp's
+                # rounding of per-attempt deadlines.
+                async with asyncio.timeout(remaining):
+                    async with self.session.post(
+                        url,
+                        data={"data": query},
+                        headers=OVERPASS_HEADERS,
+                        timeout=timeout,
+                    ) as response:
+                        if response.status in {429, 504, 502}:
+                            last_error = "map_busy"
+                            continue
+                        if response.status != 200:
+                            last_error = "map_unavailable"
+                            continue
+                        payload = await response.json(content_type=None)
+                        crossings, stations, rails, has_highway = parse_overpass(payload, (lat, lon))
             except (aiohttp.ClientError, TimeoutError):
                 last_error = "map_busy"
                 continue
             except ValueError:
                 last_error = "map_unavailable"
                 continue
-            crossings, stations, rails, has_highway = parse_overpass(payload, (lat, lon))
             result = OsmAround(crossings, stations, rails, has_highway)
             _cache[key] = (now, result)
             return result

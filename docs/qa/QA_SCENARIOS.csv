@@ -1,0 +1,661 @@
+area,scenario,variant,result,case_count,evidence
+Backend,backend/tests/test_catalog.py::test_discovery_keeps_every_provider_candidate,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_catalog.py::test_spatial_index_keeps_more_than_200_routes_and_replaces_old_segments,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_catalog.py::test_index_migration_preserves_route_freshness,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_catalog.py::test_sync_resumes_with_unscanned_stations_and_unfetched_trains,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_catalog.py::test_refresh_failure_keeps_old_route_and_backs_off,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_catalog.py::test_empty_boards_remain_unverified_and_provider_outage_stops_after_three,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_catalog.py::test_refresh_lease_is_shared_across_connections_and_released_on_cancellation,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_catalog.py::test_live_budget_rotates_through_all_indexed_candidates,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_catalog.py::test_fresh_snapshots_do_not_consume_live_budget,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_catalog.py::test_origin_operating_days_work_on_day_three_and_four,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_catalog.py::test_current_moving_report_survives_schedule_exclusion,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_catalog.py::test_simultaneous_locations_keep_their_own_coverage,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_chainage.py::test_eta_follows_the_rail_not_the_straight_line,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_chainage.py::test_crossing_behind_the_train_is_not_given_an_eta,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_chainage.py::test_a_train_past_the_end_of_the_fetched_rail_is_not_at_the_gate,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_chainage.py::test_a_station_pin_beside_the_train_does_not_reverse_it,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_chainage.py::test_the_joined_rail_keeps_the_next_gate_ahead_of_the_station,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_chainage.py::test_crossing_off_the_rail_falls_through,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_cities.py::test_the_catalog_covers_indian_cities,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_cities.py::test_older_names_find_the_current_city,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_cities.py::test_delhi_prefers_the_larger_city,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_cities.py::test_a_short_or_unknown_query_returns_nothing,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_clusters.py::test_cluster_uses_road_and_station,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_clusters.py::test_unnamed_crossing_uses_the_nearest_place,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_clusters.py::test_named_crossing_keeps_its_name,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_clusters.py::test_does_not_merge_gates_kilometres_apart,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_config.py::test_an_existing_database_keeps_its_rows_under_the_new_name,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_copy.py::test_errors_are_human,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_copy.py::test_predict_hides_vendor_names,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_copy.py::test_start_has_no_vendor_names,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_copy.py::test_help_lists_every_command,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_direction.py::test_southbound_at_kannur_does_not_close_payyanur_behind,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_direction.py::test_upcoming_station_is_ahead,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_direction.py::test_far_away_train_is_not_ahead_even_if_pay_is_later_on_the_route,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_direction.py::test_crossing_beside_the_train_counts,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_wide_pair_uses_junctions_when_the_nearest_halt_is_unknown,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_empty_halt_pair_still_finds_the_mail_on_the_junction_pair,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_payyanur_express_is_found_even_when_it_skips_both_neighbouring_stations,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_one_station_can_discover_its_trains_without_a_station_pair,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_express_is_found_from_regional_boards_when_it_skips_all_local_stations[ELM-12.4],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_express_is_found_from_regional_boards_when_it_skips_all_local_stations[TKQ-12.5],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_express_is_found_from_regional_boards_when_it_skips_all_local_stations[CHV-12.6],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_regional_catalog_stations_are_deduplicated_and_keep_the_local_coordinates,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_regional_board_fallback_does_not_choose_a_distant_inland_branch,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_cached_route_is_recovered_between_stops_even_without_a_station_in_the_area,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_empty_discovery_still_checks_a_train_passing_between_distant_stops,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_cached_payyanur_route_survives_an_empty_provider_discovery,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_a_gate_just_past_two_kilometres_still_shows_when_it_is_closing,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_trains_due_now_come_before_trains_due_later,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_a_train_at_a_local_station_is_not_marked_passed,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_discover.py::test_a_distant_train_with_a_past_local_clock_is_marked_passed,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_erail.py::test_parse_caret_payload,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_erail.py::test_parse_keeps_the_departure_clock,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_erail.py::test_names_are_parsed_separately_from_numbers_and_stations,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_erail.py::test_discovery_keeps_train_names_without_an_additional_request,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_erail.py::test_station_board_parses_local_departures_instead_of_destination_times,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_erail.py::test_station_boards_are_cached_and_also_supply_train_names,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_erail.py::test_a_failed_or_unreadable_board_is_not_cached_as_no_trains,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_erail.py::test_failed_lookup_is_not_cached,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_erail.py::test_empty_timetable_is_cached,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_bad_successful_map_reply_fails_over_instead_of_crashing_or_caching_empty[None],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_bad_successful_map_reply_fails_over_instead_of_crashing_or_caching_empty[broken1],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_bad_successful_map_reply_fails_over_instead_of_crashing_or_caching_empty[broken2],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_bad_successful_map_reply_fails_over_instead_of_crashing_or_caching_empty[broken3],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_bad_successful_map_reply_fails_over_instead_of_crashing_or_caching_empty[broken4],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_bad_successful_map_reply_fails_over_instead_of_crashing_or_caching_empty[broken5],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_bad_successful_map_reply_fails_over_instead_of_crashing_or_caching_empty[broken6],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_bad_successful_map_reply_fails_over_instead_of_crashing_or_caching_empty[broken7],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_bad_successful_map_reply_fails_over_instead_of_crashing_or_caching_empty[broken8],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_bad_successful_map_reply_fails_over_instead_of_crashing_or_caching_empty[broken9],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_valid_empty_map_is_success_but_all_malformed_maps_remain_retryable,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_nonfinite_or_out_of_range_map_geometry_is_not_an_occupied_track[coords0],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_nonfinite_or_out_of_range_map_geometry_is_not_an_occupied_track[coords1],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_nonfinite_or_out_of_range_map_geometry_is_not_an_occupied_track[coords2],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_nonfinite_or_out_of_range_map_geometry_is_not_an_occupied_track[coords3],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_one_failed_live_check_does_not_hide_other_trains[error0],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_one_failed_live_check_does_not_hide_other_trains[error1],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_one_bad_departure_board_keeps_other_discovered_services,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_failed_timetable_refresh_preserves_successful_routes_and_backs_off,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_one_abandoned_location_check_does_not_cancel_another_users_shared_report,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_unexpected_programming_error_is_not_silently_reported_as_provider_outage,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_discovery_http_failure_is_not_a_valid_empty_response[429-board],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_discovery_http_failure_is_not_a_valid_empty_response[429-pair],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_discovery_http_failure_is_not_a_valid_empty_response[500-board],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_discovery_http_failure_is_not_a_valid_empty_response[500-pair],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_discovery_http_failure_is_not_a_valid_empty_response[502-board],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_discovery_http_failure_is_not_a_valid_empty_response[502-pair],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_unreadable_pair_page_is_retryable_but_delimited_empty_pair_is_valid,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_indexed_route_remains_visible_when_provider_discovery_is_down,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_discovery_outage_counts_belong_to_each_request,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_discovery_failure_cannot_claim_a_clear_line_in_telegram[sightings0],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_failure_workflows.py::test_discovery_failure_cannot_claim_a_clear_line_in_telegram[sightings1],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_community_reports_use_no_live_train_lookup_and_validate_input,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_predictions_and_scenes_share_a_limit_and_return_retry_after,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_catalog_coverage_reads_no_upstream_data,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-91-/place],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-91-/halts],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-91-/gates],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-91-/predict],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-91-/scene],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat--91-/place],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat--91-/halts],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat--91-/gates],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat--91-/predict],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat--91-/scene],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon-181-/place],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon-181-/halts],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon-181-/gates],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon-181-/predict],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon-181-/scene],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon--181-/place],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon--181-/halts],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon--181-/gates],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon--181-/predict],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon--181-/scene],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-nan-/place],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-nan-/halts],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-nan-/gates],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-nan-/predict],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-nan-/scene],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon-nan-/place],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon-nan-/halts],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon-nan-/gates],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon-nan-/predict],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon-nan-/scene],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-inf-/place],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-inf-/halts],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-inf-/gates],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-inf-/predict],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lat-inf-/scene],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon--inf-/place],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon--inf-/halts],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon--inf-/gates],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon--inf-/predict],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_location_endpoints_reject_invalid_coordinates_before_lookup[lon--inf-/scene],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_halt_radius_must_be_finite[nan],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_halt_radius_must_be_finite[inf],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_halt_radius_must_be_finite[-inf],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_coordinate_validation_keeps_valid_boundaries[-90--180],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_coordinate_validation_keeps_valid_boundaries[90-180],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_feature_api.py::test_coordinate_validation_keeps_valid_boundaries[0-0],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_gate_predictions.py::test_each_gate_uses_its_own_eta_and_a_passed_gate_is_excluded,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_gate_timing.py::test_report_age_is_taken_off_once,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_gate_timing.py::test_a_frozen_at_station_report_needs_an_update_instead_of_inventing_passage,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_gate_timing.py::test_a_train_that_ends_before_the_gate_never_closes_it,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_gate_timing.py::test_a_distance_guess_does_not_overrule_the_timetable_for_a_standing_train,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_gate_timing.py::test_ahead_distance_is_counted_from_the_last_station,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_gate_timing.py::test_the_barrier_is_down_for_the_lead_time_and_a_little_after,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_gate_timing.py::test_gate_copy_counts_down_to_the_barrier,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_gate_timing.py::test_a_just_passed_train_is_named_once,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_geoportal.py::test_ir_stations_keep_one_coded_row_and_its_zone,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_geoportal.py::test_only_level_crossings_are_kept,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_geoportal.py::test_the_dump_does_not_replace_a_known_halt_or_a_user_pin,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_geoportal.py::test_a_saved_gate_beside_an_osm_gate_is_not_drawn_twice,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_halts.py::test_catalog_keeps_halts_and_stations_with_coordinates,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_halts.py::test_nearby_halts_come_from_our_store,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_halts.py::test_a_blank_zone_is_filled_without_touching_a_known_one,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_halts.py::test_catalog_coordinates_fill_a_station_the_map_missed,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_host_timezone.py::test_prediction_eligibility_eta_and_scene_epoch_match_on_both_hosts[UTC-afternoon],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_host_timezone.py::test_prediction_eligibility_eta_and_scene_epoch_match_on_both_hosts[UTC-indian-midnight-weekday],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_host_timezone.py::test_prediction_eligibility_eta_and_scene_epoch_match_on_both_hosts[Asia/Kolkata-afternoon],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_host_timezone.py::test_prediction_eligibility_eta_and_scene_epoch_match_on_both_hosts[Asia/Kolkata-indian-midnight-weekday],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_host_timezone.py::test_default_live_report_and_upcoming_clocks_are_indian_and_epoch_correct[UTC],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_host_timezone.py::test_default_live_report_and_upcoming_clocks_are_indian_and_epoch_correct[Asia/Kolkata],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_host_timezone.py::test_discovery_priority_uses_indian_local_clock_after_midnight[UTC],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_host_timezone.py::test_discovery_priority_uses_indian_local_clock_after_midnight[Asia/Kolkata],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_host_timezone.py::test_explicit_naive_live_clock_is_still_supported,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_live_report_age_accepts_provider_numeric_strings[8],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_live_report_age_accepts_provider_numeric_strings[14.5_0],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_live_report_age_accepts_provider_numeric_strings[14.5_1],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_invalid_report_age_is_unresolved_instead_of_fresh_or_crashing[inf0],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_invalid_report_age_is_unresolved_instead_of_fresh_or_crashing[nan0],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_invalid_report_age_is_unresolved_instead_of_fresh_or_crashing[inf1],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_invalid_report_age_is_unresolved_instead_of_fresh_or_crashing[nan1],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_invalid_report_age_is_unresolved_instead_of_fresh_or_crashing[invalid],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_invalid_report_age_is_unresolved_instead_of_fresh_or_crashing[100000000000000000000],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_invalid_provider_coordinates_do_not_enter_predictions[coords0],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_invalid_provider_coordinates_do_not_enter_predictions[coords1],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_invalid_provider_coordinates_do_not_enter_predictions[coords2],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_invalid_provider_coordinates_do_not_enter_predictions[coords3],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_malformed_optional_provider_numbers_do_not_abort_a_live_batch,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_malformed_upcoming_station_container_does_not_abort_a_live_batch,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_malformed_provider_page_data_preserves_the_html_fallback,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_normalize_dict,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_cached_live_report_ages_between_predict_and_scene_without_another_fetch,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_normalize_list_picks_running_instance,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_a_named_origin_is_kept_before_departure,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_an_unnamed_not_started_report_is_dropped,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_an_expired_payload_is_kept_for_the_timetable,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_not_started_today_uses_yesterdays_running_report,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_finished_run_is_not_treated_as_live,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_late_train_with_current_station_is_usable,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_position_keeps_the_run_detail,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_live.py::test_html_fallback_reads_current_station,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_map_deadline.py::test_all_cold_mirrors_share_one_deadline_below_browser_timeout,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_map_deadline.py::test_last_mirror_can_recover_inside_remaining_budget_and_warm_lookup_needs_no_network,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_map_deadline.py::test_deadline_preserves_stale_map_without_making_it_fresh,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_map_deadline.py::test_overall_deadline_is_enforced_even_if_transport_ignores_its_timeout,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_map_deadline.py::test_user_cancellation_stops_failover_instead_of_becoming_a_map_result[cold],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_map_deadline.py::test_user_cancellation_stops_failover_instead_of_becoming_a_map_result[stale-cache],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_maps.py::test_coords_from_google_maps_at,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_maps.py::test_plus_code_in_share_url_with_extra_query,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_maps.py::test_looks_like_maps,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_osm_parse.py::test_parse_overpass_splits_crossings_stations_rails,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_osm_parse.py::test_missing_geometry_point_does_not_drop_the_map,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_osm_parse.py::test_station_way_with_ref_is_parsed,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_a_gate_gets_a_closure_estimate_even_when_the_train_does_not_stop_at_its_station[ELM-6],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_a_gate_gets_a_closure_estimate_even_when_the_train_does_not_stop_at_its_station[TKQ-12],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_a_gate_gets_a_closure_estimate_even_when_the_train_does_not_stop_at_its_station[CHV-18],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_a_train_on_a_different_route_does_not_close_the_gate,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_long_nonstop_leg_uses_a_physically_compatible_local_rail_bend,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_bent_nonstop_leg_retains_the_reverse_train_direction,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_stale_stopped_report_on_a_bent_nonstop_leg_remains_unresolved,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_bent_leg_inference_cannot_move_a_train_onto_a_disconnected_parallel_branch,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_mapped_components_are_checked_beyond_the_clipped_scene_segment,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_bent_leg_fallback_rejects_incompatible_geometry[no_rail],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_bent_leg_fallback_rejects_incompatible_geometry[impossible_distance],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_bent_leg_fallback_rejects_incompatible_geometry[unrelated_direction],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_passing_halts.py::test_bent_leg_fallback_rejects_incompatible_geometry[distant_line],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_place.py::test_city_click_names_the_neighbourhood,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_place.py::test_village_click_names_the_district,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_place.py::test_broad_click_names_the_state,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_place.py::test_lookup_reuses_a_nearby_name,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_place.py::test_lookup_keeps_a_miss_from_retrying_immediately,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_place.py::test_cancelled_place_request_keeps_the_shared_lookup_and_cache,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_reports.py::test_reports_replace_a_devices_previous_observation_and_expire,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_reports.py::test_reporter_identifiers_are_not_returned_or_stored_verbatim,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_stitch_joins_a_reversed_fragment,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_stitch_leaves_a_gap_broken,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_scene_places_a_train_on_the_drawn_rail,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_scene_without_a_rail_stays_closed,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_far_train_keeps_its_eta_but_is_not_drawn_at_the_local_rail_endpoint,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_motion_uses_travel_direction_on_the_selected_rail[False-1],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_motion_uses_travel_direction_on_the_selected_rail[True--1],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_motion_is_not_invented_for_stopped_old_or_directionless_trains[stopped],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_motion_is_not_invented_for_stopped_old_or_directionless_trains[old],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_motion_is_not_invented_for_stopped_old_or_directionless_trains[unknown],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_motion_is_not_invented_for_stopped_old_or_directionless_trains[uncertain],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_later_estimates_remain_available_in_gate_details,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_closed_gate_view_includes_the_train_during_the_barrier_lead_time,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_parallel_tracks_stay_separate_without_returning_along_the_neighbour[original],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_parallel_tracks_stay_separate_without_returning_along_the_neighbour[reordered],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_parallel_tracks_stay_separate_without_returning_along_the_neighbour[reversed_ways],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_a_straight_gap_can_be_joined_but_a_lateral_jump_to_a_parallel_track_cannot,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_one_service_keeps_its_geographic_direction_between_neighbouring_gates[False],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_one_service_keeps_its_geographic_direction_between_neighbouring_gates[True],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_two_opposing_services_retain_distinct_identities_and_directions,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_scene.py::test_scene_includes_the_second_approaching_train_even_when_the_first_is_already_near,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_snapshots.py::test_workers_share_one_fetch_and_keep_the_snapshot_after_restart,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_snapshots.py::test_cancelled_request_does_not_cancel_a_shared_provider_fetch,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_snapshots.py::test_failed_fetch_releases_the_lease_for_retry,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_stopped_upstream_report_never_turns_into_a_passed_train[True-8],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_stopped_upstream_report_never_turns_into_a_passed_train[True-14],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_stopped_upstream_report_never_turns_into_a_passed_train[True-30],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_stopped_upstream_report_never_turns_into_a_passed_train[False-8],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_stopped_upstream_report_never_turns_into_a_passed_train[False-14],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_stopped_upstream_report_never_turns_into_a_passed_train[False-30],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_provider_string_age_keeps_stopped_train_unresolved[8],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_provider_string_age_keeps_stopped_train_unresolved[14.5],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_provider_string_age_keeps_stopped_train_unresolved[nan],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_provider_string_age_keeps_stopped_train_unresolved[invalid],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_fresh_stopped_report_retains_the_run_time_from_the_station[0],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_fresh_stopped_report_retains_the_run_time_from_the_station[3],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_fresh_stopped_report_retains_the_run_time_from_the_station[7],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_new_departure_and_position_beyond_the_gate_resolve_the_wait,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_fresh_stopped_report_at_the_gate_cannot_expire_during_a_long_halt,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_scene_retains_the_unresolved_train_and_other_train_estimates,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_stopped_reports.py::test_prediction_and_telegram_keep_the_same_unresolved_crossing,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_route_keeps_pass_throughs_and_rolls_the_day,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_nonfinite_timetable_distances_are_ignored,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_nonfinite_optional_timetable_number_does_not_abort_the_route,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_malformed_provider_page_data_is_an_unavailable_timetable,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_lateness_is_measured_from_the_clock_not_added_twice,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_a_run_that_crossed_midnight_uses_yesterdays_clock,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_before_departure_the_wait_is_part_of_the_gate_time,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_a_gate_off_the_route_is_not_timed,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_a_late_clock_does_not_close_a_gate_the_train_has_not_reached,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_a_gate_behind_the_train_is_not_given_a_time,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_a_near_rail_fix_wins_when_the_timetable_km_is_stale,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_halt_slack_keeps_a_short_hop_from_saying_closed,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_html_route_is_read_from_the_schedule_block,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_route_roundtrip,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_an_old_route_table_learns_run_days,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_expired_before_departure_still_gets_a_gate_time,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_expired_long_after_departure_stays_hidden,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_a_saturday_train_waits_until_saturday,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_a_live_train_is_kept_on_a_day_it_does_not_start,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_just_after_departure_without_a_report_stays_at_the_origin,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_a_gate_on_a_bend_uses_the_rail_between_the_halts,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_run_days_come_from_the_schedule_block,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_only_a_train_near_this_stretch_is_fetched_live,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_timetable.py::test_a_distant_train_keeps_an_on_time_estimate_without_a_live_report,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_train_names.py::test_names_survive_restart_and_blank_payloads_do_not_erase_them,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_train_names.py::test_official_names_are_preferred_to_route_descriptions,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_train_names.py::test_route_is_a_fallback_when_no_official_name_is_available,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_train_names.py::test_timetable_only_positions_receive_discovered_names_without_live_calls,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_verify.py::test_reject_when_far_from_rail,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_verify.py::test_match_existing_osm_crossing,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Backend,backend/tests/test_verify.py::test_candidate_when_on_track_and_road,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_api_workflow.py::test_cached_provider_snapshot_reuses_fetch_time_and_ages,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_api_workflow.py::test_http_gate_workflow_keeps_stopped_train_and_other_services_separate,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[southbound-Harbour Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[southbound-Temple Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[southbound-Market Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[southbound-School Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[southbound-Canal Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[southbound-Mill Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[southbound-Station Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[southbound-Church Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[southbound-Bypass],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[southbound-Lake Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[southbound-Hospital Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[southbound-Beach Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[northbound-Harbour Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[northbound-Temple Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[northbound-Market Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[northbound-School Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[northbound-Canal Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[northbound-Mill Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[northbound-Station Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[northbound-Church Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[northbound-Bypass],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[northbound-Lake Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[northbound-Hospital Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_corridor_matrix.py::test_both_directions_at_every_crossing[northbound-Beach Road],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-rider_on_express],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-waiting_at_gate],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-rider_pin_stays],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-stale_feed],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-late_express],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-northbound_memu],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-gate_by_platform],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-two_trains_cross],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-feed_stalls_moving],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-crossed_non_stop],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-waiting_at_origin],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-terminates_short],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-three_hours_late],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-after_midnight],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-stopped_feed_recovers],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[uncached-express_skips_local_stops],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-rider_on_express],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-waiting_at_gate],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-rider_pin_stays],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-stale_feed],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-late_express],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-northbound_memu],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-gate_by_platform],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-two_trains_cross],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-feed_stalls_moving],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-crossed_non_stop],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-waiting_at_origin],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-terminates_short],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-three_hours_late],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-after_midnight],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-stopped_feed_recovers],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_scenario[shared_snapshot-express_skips_local_stops],Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_riding_over_the_gate_keeps_it_closed_then_says_passed,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_the_barrier_counts_down_to_the_lead_time,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_the_feed_says_ahead_of_the_last_station_like_railyatri,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_the_judge_catches_a_silent_app_and_an_early_passed_note,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_frozen_stopped_report_stays_visible_and_recovers_without_a_false_passage,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_the_judge_rejects_silent_or_counting_down_stale_stopped_reports,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_simulator_rejects_nonpositive_time_steps,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_unknown_scenario_cannot_silently_report_success,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_simulation_clock_preserves_the_epoch_across_timezones,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Simulator,simulator/tests/test_scenarios.py::test_held_stopped_estimate_cannot_hide_an_arbitrarily_wrong_eta,Controlled provider/database/clock conditions,PASS,1,/tmp/gateahead-full-audit-python.log
+Web unit/component,bad nested prediction fields preserve the saved check and original timestamp,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,malformed nested scenes are rejected before map and timing consumers,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an invalid prediction timestamp cannot freeze stopped report aging,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a future-dated saved scene cannot prevent a current server check,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,malformed community replies cannot replace report state or claim success,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,offline predictions preserve the original fetch timestamp,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a failed map response cannot overwrite a successful prediction,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,opening the same scene within 90 seconds reuses its response,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,rate limits retain the server retry delay,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a newer nearby check invalidates an older scene inside the 90-second cache,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a malformed successful response keeps the last usable offline prediction,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,malformed successful responses without a saved result produce a usable error,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,wrong response object shapes cannot reach crossing and scene consumers,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an incomplete saved object is ignored before restoring a prediction,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,bare service errors remain usable by scene and prediction consumers,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,aborting before headers complete cannot pause checks or return saved data,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,invalid saved response containers cannot prevent a fresh check,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an aborted scene request cannot return a cached scene,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,aborting while a response is parsed cannot update the saved result,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,HTTP-date retry headers preserve the provider's retry time,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,invalid retry delays use the default pause instead of allowing immediate retries,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a slower earlier scene response cannot replace a newer completed check in the cache,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,malformed legacy saved gates cannot reach crossing details or React labels,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a saved location with a malformed label cannot crash the location control,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,shared links reject absent and invalid coordinates,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,weekday overnight commute belongs to the day it starts,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,normal commute windows use an exclusive end and reject equal hours,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,gate markers use exact crossing results and retain individual names,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an older grouped estimate keeps affected gates visible without claiming exact timing,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a newer gate check replaces the old Nearby estimate when returning to the list,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,checked gates retain their latest train when switching between details and lists,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an unresolved train suppresses a later train's gate countdown,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a fresh gate check resolves only that gate's waiting report,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,"the label counts down to the barrier, not the train",Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,once the barrier is down the label says when the train comes,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an uncertain approaching estimate cannot claim that the gate is closed,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an older API without closes_in still reads sensibly,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a train that went over is named as passed,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a northbound gate blocks the road and leaves the track open,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an eastbound gate sits north and south of the rail,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a raised gate draws posts and no boom across the road,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a report without movement metadata remains at its reported position,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a held report stays where it was reported,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a distant train is not clamped onto the local track endpoint,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,old reports hide the train marker and do not animate the barrier,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,closing soon does not draw the barrier as already down,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,"a moving train crosses automatically at its ETA, in real time",Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,the animation handles reverse travel on the same track,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a train 23 minutes away is never replayed at the crossing after 14 seconds,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,closed before arrival shows the approaching train and animates until it passes,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,reopening a cached scene continues from snapshot time rather than replaying,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,expired motion and out-of-bounds positions disappear without endpoint clamping,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,barriers follow closure time and the estimated clearance window,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,two identified trains animate simultaneously in opposite directions,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,one train expiring does not remove the second marker or reopen the barrier,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a passed first train does not hide the second approaching service,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,each train retains its own snapshot time and estimated parallel track,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,offline scenes suppress all markers and duplicate train IDs are not cloned,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a stopped train keeps its reported position and cannot close the barrier by timer,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,stopped reports remain visible through their freshness window and then disappear,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,north is −z and east is +x,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a northbound nose uses yaw 0,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an eastbound nose yaws so −z lands on +x,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,chainage of the far end matches the path,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,yaw puts the mesh nose on the travel direction,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,the camera looks along the track from beside it,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,"a lowered boom lies along the track, across the road",Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a fresh report walks toward the gate and a stale one stays,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,rails face upward,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,sleepers lie across a northbound track,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an unresolved stopped train stays visible ahead of other train estimates,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,minute-by-minute stopped-feed simulation keeps 16650 unresolved beside independently moving 16603,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,stopped reports age on the original receipt clock when server offset is -3600000,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,moving map estimates continue on the receipt clock when server offset is -3600000,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,stopped reports age on the original receipt clock when server offset is 3600000,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,moving map estimates continue on the receipt clock when server offset is 3600000,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a plausible transit delay and missing source clock keep their original anchors,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,"nearby, train list, and details count down from the same check",Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,offline and expired snapshots retain their original timing,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an estimate becomes recently passed after its clearance window,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,uncertain approaching estimates are not promoted to a closed gate,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a fresh closed-gate train keeps moving through its ETA beyond the area check interval,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a second fresh train remains current after the first scene report expires,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a stopped train does not cross or pass a gate on the client timer,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an expired stopped report remains unresolved beside a fresh second train,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,nearby and train lists hold stopped estimates and mark expired reports unresolved,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,development releases the old offline shell and preserves unrelated workers and caches,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,an already unregistered worker still releases the controlled page with one reload,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Web unit/component,a production worker update reloads an older page once; first installation does not,Deterministic regression,PASS,1,/tmp/gateahead-web-deep-after.log
+Flutter controller/widget,friendly errors stay short,mobile/test/format_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,place names and closing times match the web copy,mobile/test/format_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a departed train keeps the platform and the next halt,mobile/test/format_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,closing gates sort ahead of the rest,mobile/test/format_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,"the label counts down to the barrier, not the train",mobile/test/format_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,an uncertain inferred approach cannot claim that the barrier is closed,mobile/test/format_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a just-passed train is listed once and the gate keeps its barrier time,mobile/test/format_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,the gate view reads the barrier time and a passed train,mobile/test/format_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a newer place wins when two lookups overlap,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,"the place name waits, then a confirm loads gates",mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,GPS loads crossings while its place name is still pending,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,confirming before the preview resolves still names the place,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,missing or failed names retain coordinates and crossings,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,cancelled map picks and blocked GPS retain the chosen city,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,an old GPS name cannot replace a newly chosen city,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,disposing ignores outstanding name and crossing lookups,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,an open crossing ignores a late scene after close,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,repeating the same map pick ignores the first name reply,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a saved gate cannot reopen after disposal,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a shared crossing cannot reopen after disposal,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a saved gate ignores a newer selection at the same coordinates,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a pending saved gate respects a newer gate selection,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a pending shared gate respects a newer gate selection,mobile/test/controller_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a stopped prediction holds its estimate before eight minutes,mobile/test/timing_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,stopped trains become unresolved at eight minutes without passage,mobile/test/timing_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,crossing scene keeps stopped train unresolved alongside next service,mobile/test/timing_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,repeated reads use the original snapshot clock,mobile/test/timing_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,offline timings retain the saved check instead of simulating travel,mobile/test/timing_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,fresh replacement moving report restores a crossing estimate,mobile/test/timing_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,closing then reopening a gate cannot save a late obsolete scene,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a malformed sibling cache row does not break a fresh crossing lookup: null,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,"a malformed sibling cache row does not break a fresh crossing lookup: {at: broken, data: {}}",mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a malformed sibling cache row does not break a fresh crossing lookup: {at: 1},mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a malformed sibling cache row does not break a fresh crossing lookup: [],mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,returning to a place skips unusable saved predictions: {approaching: old-format},mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,"returning to a place skips unusable saved predictions: {approaching: [], passed: {}}",mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,an out-of-range saved cache timestamp cannot crash startup,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a restored location with a damaged label still loads its crossings,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,saved commute clocks recover safely from an unusable older value,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a granted GPS result chooses its location when no newer choice exists,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,late GPS success cannot replace a newly selected city,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,late GPS denial cannot replace a newly selected city,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a new map pin cancels GPS without losing the preview,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a denied GPS request preserves the previous location and allows retry,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,GPS completion after leaving the app does not notify a disposed controller,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a failed newer scene does not discard an older successful response,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,invalid saved pause or location cannot prevent a fresh start,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,daytime and overnight commute boundaries work across a full week,mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,"automatic checks respect visibility, the two-minute boundary, and server pauses",mobile/test/user_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,offline predictions retain their original check time,mobile/test/features_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a malformed successful reply preserves the saved prediction,mobile/test/features_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,malformed crossing arrays preserve the saved scene and gates,mobile/test/features_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,the saved choice matches the website,mobile/test/theme_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,saved gate names survive a new controller and can be removed,mobile/test/features_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,automatic checks pause in the background and respect the interval,mobile/test/features_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,weekday overnight commute includes early Saturday but not early Monday,mobile/test/features_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,crossing links round trip and reject invalid coordinates,mobile/test/features_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a passed gate does not inherit its cluster's closed status,mobile/test/features_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a newer prediction forces a fresh crossing detail request,mobile/test/features_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,typing a city offers a match,mobile/test/city_search_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,an unresolved stopped train stays visible beside other services,mobile/test/timing_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,returning Nearby retains the newer gate scene and its train,mobile/test/scene_reconciliation_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a newer stopped report remains unresolved beside another service,mobile/test/scene_reconciliation_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a newer nearby check supersedes a retained gate scene,mobile/test/scene_reconciliation_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,older cached scenes do not overwrite a newer prediction,mobile/test/scene_reconciliation_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,offline scenes do not overwrite a newer prediction,mobile/test/scene_reconciliation_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,changing place clears every retained gate check,mobile/test/scene_reconciliation_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a resolved gate does not clear uncertainty at another gate,mobile/test/scene_reconciliation_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a scene can mark a gate before the first nearby train check,mobile/test/scene_reconciliation_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,an inferred near crossing does not claim closure in the train list,mobile/test/timing_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a newly cleared scene removes a stale closed estimate,mobile/test/scene_reconciliation_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,per-gate checks survive opening and closing another gate,mobile/test/scene_reconciliation_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,prediction with server clock behind ages from original receipt,mobile/test/clock_anchor_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,scene with server clock behind ages consistently with its map marker,mobile/test/clock_anchor_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,prediction with server clock ahead ages from original receipt,mobile/test/clock_anchor_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,scene with server clock ahead ages consistently with its map marker,mobile/test/clock_anchor_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a plausible cached source clock keeps the original elapsed time,mobile/test/clock_anchor_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,legacy scenes without receipt metadata retain their source clock,mobile/test/clock_anchor_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,gate and scene payloads use the FastAPI paths,mobile/test/api_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,city search reads the Indian city list,mobile/test/api_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a busy predict tells the person to wait,mobile/test/api_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,predict keeps an approaching train and drops a passed sighting,mobile/test/api_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,a train sits on the rail at its along-track kilometre,mobile/test/api_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,the india overlay is a country outline plus a rail network,mobile/test/india_map_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,clearing city search suppresses late matches,mobile/test/user_widget_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,appearance in settings switches to the light theme,mobile/test/theme_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,clearing city search suppresses late failure,mobile/test/user_widget_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,the selected location appears beside its crossing count,mobile/test/location_label_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,"a commuter saves, renames, reopens and removes a crossing",mobile/test/user_widget_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,sharing a gate copies a usable crossing link,mobile/test/user_widget_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,reporting allows retry after failure without closing the selected crossing,mobile/test/user_widget_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,dismissing a pending report cannot pop the crossing when its reply arrives,mobile/test/user_widget_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,discovery failure is visible without estimates,mobile/test/user_widget_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,discovery failure is visible beside known services,mobile/test/user_widget_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Flutter controller/widget,commute settings stay disabled before a place and allow safe time selection afterward,mobile/test/user_widget_journeys_test.dart,PASS,1,/tmp/gateahead-mobile-audit-results.jsonl
+Browser crossing workflow,stopped-report-timeline,1440x1000,PASS,1,/tmp/gateahead-browser-audit/crossings/results.json
+Browser crossing workflow,newer-scene-reconciles-nearby,1440x1000,PASS,1,/tmp/gateahead-browser-audit/crossings/results.json
+Browser crossing workflow,saved-report-settings-dialogs,1440x1000,PASS,1,/tmp/gateahead-browser-audit/crossings/results.json
+Browser crossing workflow,rate-limit-cache-offline,1440x1000,PASS,1,/tmp/gateahead-browser-audit/crossings/results.json
+Browser crossing workflow,late-scene-cannot-reopen-other-gate,1440x1000,PASS,1,/tmp/gateahead-browser-audit/crossings/results.json
+Browser user journey,first-visit-search-keyboard,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,gps-permission-granted,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,gps-denied-recovers-with-search,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,old-gps-success-cannot-replace-city,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,old-gps-error-cannot-replace-city,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,typing-new-city-does-not-select-old-result,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,map-pick-cancel-confirm-double-tap,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,map-pick-escape-keeps-selected-crossing,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,map-pick-traps-keyboard-in-confirmation,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,saved-rename-reload-open-remove,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,saved-load-cannot-override-new-city,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,share-link-round-trip,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,new-city-after-shared-link-survives-reload,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,incoming-link-untouched-while-gates-load,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,incoming-link-manual-gate-while-gates-load,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,incoming-link-navigate-away-while-gates-load,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,report-replace-expire-and-keyboard-tabs,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,commute-automatic-checks-outside,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,commute-automatic-checks-inside,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,legacy-saved-record-does-not-crash,desktop,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,first-visit-search-keyboard,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,gps-permission-granted,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,gps-denied-recovers-with-search,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,old-gps-success-cannot-replace-city,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,old-gps-error-cannot-replace-city,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,typing-new-city-does-not-select-old-result,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,map-pick-cancel-confirm-double-tap,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,map-pick-escape-keeps-selected-crossing,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,map-pick-traps-keyboard-in-confirmation,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,saved-rename-reload-open-remove,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,saved-load-cannot-override-new-city,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,share-link-round-trip,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,new-city-after-shared-link-survives-reload,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,incoming-link-untouched-while-gates-load,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,incoming-link-manual-gate-while-gates-load,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,incoming-link-navigate-away-while-gates-load,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,report-replace-expire-and-keyboard-tabs,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,commute-automatic-checks-outside,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,commute-automatic-checks-inside,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser user journey,legacy-saved-record-does-not-crash,phone,PASS,1,/tmp/gateahead-browser-audit/journeys/results.json
+Browser paired conditions,desktop-moving-clock,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-stopped-clock-held,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-expired-train-does-not-hide-fresh-train,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-opposing-directions,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-uncertain-near-train-keeps-barrier-unknown,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-source-clock-behind,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-source-clock-ahead,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-saved-result-survives-503,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-saved-result-survives-offline,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-saved-result-survives-bad-ids,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-saved-result-survives-bad-name,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-saved-result-survives-bad-source-time,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-complete-coverage,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-partial-coverage,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-discovery-down-no-estimates,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-discovery-down-known-service,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-automatic-visible-online,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-automatic-hidden-online,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-automatic-visible-offline,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-automatic-disabled,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-reduced-motion-keeps-wall-clock-position,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-malformed-scene-keeps-navigation,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-malformed-report-keeps-dialog-and-retry,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,desktop-no-map-graphics-retains-crossing-list,desktop,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-moving-clock,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-stopped-clock-held,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-expired-train-does-not-hide-fresh-train,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-opposing-directions,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-uncertain-near-train-keeps-barrier-unknown,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-source-clock-behind,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-source-clock-ahead,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-saved-result-survives-503,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-saved-result-survives-offline,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-saved-result-survives-bad-ids,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-saved-result-survives-bad-name,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-saved-result-survives-bad-source-time,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-complete-coverage,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-partial-coverage,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-discovery-down-no-estimates,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-discovery-down-known-service,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-automatic-visible-online,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-automatic-hidden-online,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-automatic-visible-offline,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-automatic-disabled,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-reduced-motion-keeps-wall-clock-position,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-malformed-scene-keeps-navigation,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-malformed-report-keeps-dialog-and-retry,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Browser paired conditions,phone-no-map-graphics-retains-crossing-list,phone,PASS,1,/tmp/gateahead-browser-audit/conditions/results.json
+Production browser/offline,production application renders,"Chromium phone viewport, real production service worker",PASS,1,/tmp/gateahead-browser-offline-release/results.json
+Production browser/offline,service worker controls page and caches JavaScript and CSS,"Chromium phone viewport, real production service worker",PASS,1,/tmp/gateahead-browser-offline-release/results.json
+Production browser/offline,offline reload renders application and navigation,"Chromium phone viewport, real production service worker",PASS,1,/tmp/gateahead-browser-offline-release/results.json
+Production browser/offline,offline JavaScript and CSS come from the application cache,"Chromium phone viewport, real production service worker",PASS,1,/tmp/gateahead-browser-offline-release/results.json
+Production browser/offline,return online renders without uncaught browser errors,"Chromium phone viewport, real production service worker",PASS,1,/tmp/gateahead-browser-offline-release/results.json
+Native visual smoke,Native Linux startup and map,"Linux debug build, isolated Xvfb, software graphics",PASS,1,/tmp/gateahead-native-linux.png
+Native visual smoke,Native Linux Settings,"Linux debug build, isolated Xvfb, software graphics",PASS,1,/tmp/gateahead-native-linux-settings.png
+Native visual smoke,Native Linux search sheet,"Linux debug build, isolated Xvfb, software graphics",PASS,1,/tmp/gateahead-native-linux-search.png
+Live browser/API,Payyanur crossings and train check,"53 crossings, 13 checked; 12 running; 5 discovery and 5 live reports unavailable",PASS_WITH_PARTIAL_DATA,1,/tmp/gateahead-live-release-final.json
+Remaining scope,Physical Android device,"Native phone installation, GPS hardware, OS permission/lifecycle behavior need a real device.",NOT_TESTED,0,TEST_REPORT.txt
+Remaining scope,Physical iOS device and Safari,"Signing, installation and actual Safari/iOS behavior were not exercised.",NOT_TESTED,0,TEST_REPORT.txt
+Remaining scope,Firefox and other browser engines,Chromium was tested; the other engines were not installed/tested.,NOT_TESTED,0,TEST_REPORT.txt
+Remaining scope,Nationwide operational completeness,One live area plus synthetic corridors do not establish every station/train/diversion/freight movement.,NOT_TESTED,0,TEST_REPORT.txt
+Remaining scope,Physical barrier ground truth,Predictions are estimates; no physical barrier observation was independently verified.,NOT_TESTED,0,TEST_REPORT.txt
+Remaining scope,Production-scale load and security penetration,Concurrent fault behavior was tested; no production load/SLA benchmark or independent penetration audit.,NOT_TESTED,0,TEST_REPORT.txt
+Remaining scope,Production traffic A/B experiment,Paired conditions were tested locally; real users were not assigned to experiments.,NOT_TESTED,0,TEST_REPORT.txt
