@@ -8,7 +8,7 @@ import aiohttp
 
 from gateahead.clusters import cluster_crossings
 from gateahead.config import Settings
-from gateahead.erail import known_train_names, train_rows
+from gateahead.erail import known_train_names, station_rows, train_rows
 from gateahead.geo import km, stitch_rail
 from gateahead.live import LiveLook, fetch_live, position_from_lts
 from gateahead.models import Crossing, Halt, PinCheck, SavedRoute, Station, TrainPosition, User
@@ -33,6 +33,7 @@ from gateahead.verify import check_pin
 _FETCH = 16
 _DISCOVER_CAP = 30
 _DISCOVER_BATCH = 10
+_CACHED_DISCOVER = 5
 _ROUTE_HOURS = 24 * 7
 _ROUTE_FETCH = 4
 _NEAR_KM = 2.0
@@ -174,8 +175,16 @@ class GateAhead:
     ) -> tuple[list[str], list[TrainPosition], dict[str, SavedRoute]]:
         now = datetime.now()
         numbers = await self._discover_trains(stations)
+        nearby_routes = self.store.route_numbers_near(lat, lon, self.settings.nearby_radius_m / 1000, _ROUTE_HOURS)
+        cached = self._cached_routes(list(dict.fromkeys(numbers + nearby_routes)))
+        extras = [number for number in nearby_routes if number not in numbers and number in cached
+                  and classify_passage(cached[number].stops, cached[number].run_days, lat, lon, now) in {"hot", "cold"}]
+        extras.sort(key=lambda number: _clock_rank(
+            min(cached[number].stops, key=lambda stop: km((lat, lon), (stop.lat, stop.lon)) if stop.lat is not None and stop.lon is not None else float("inf")).depart_min % 1440,
+            now.hour * 60 + now.minute,
+        ))
+        numbers = list(dict.fromkeys(extras[:_CACHED_DISCOVER] + numbers))[:_DISCOVER_CAP]
         self.store.remember_train_names(known_train_names(numbers))
-        cached = self._cached_routes(numbers)
         hot: list[str] = []
         cold: list[str] = []
         for number in numbers:
@@ -529,10 +538,15 @@ async def _discover_trains_from(
     now: datetime | None = None,
 ) -> list[str]:
     found: list[tuple[str, int | None]] = []
+    # A service may stop at only one of the nearby stations. Between-station
+    # queries alone omit it (for example 16512 at PAY, skipping ELM and TKQ).
+    boards = list({station.code.upper(): station for station in stations if station.code and station.kind != "halt"}.values())[:2]
     pairs = _pair_plan(stations)
-    for start in range(0, len(pairs), _DISCOVER_BATCH):
-        chunk = pairs[start : start + _DISCOVER_BATCH]
-        lists = await asyncio.gather(*[train_rows(session, origin, dest) for origin, dest in chunk])
+    lookups = [(True, station.code, station.name) for station in boards] + [(False, origin, dest) for origin, dest in pairs]
+    for start in range(0, len(lookups), _DISCOVER_BATCH):
+        chunk = lookups[start : start + _DISCOVER_BATCH]
+        lists = await asyncio.gather(*[station_rows(session, origin, dest) if board else train_rows(session, origin, dest)
+                                      for board, origin, dest in chunk])
         for rows in lists:
             found.extend(rows)
     moment = now or datetime.now()

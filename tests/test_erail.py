@@ -35,6 +35,36 @@ def test_discovery_keeps_train_names_without_an_additional_request():
     assert session.calls == 1
 
 
+_BOARD = '''<html><script>FAKE EXPRESS 99999, 01.00 hr 00:00</script>
+<h3>CLT SBC EXPRESS <span>16512</span>, 13.05 hr</h3><p>Daily</p>
+<table><tr><td>Payyanur</td><td>17:30</td></tr><tr><td>Ksr Bengaluru</td><td>06:35</td></tr></table>
+<h3>MAVELI EXPRESS 16603, 02.43 hr</h3><p>Daily</p><table><tr><td>Payyanur</td><td>19:13</td></tr></table>
+</html>'''
+
+
+def test_station_board_parses_local_departures_instead_of_destination_times():
+    rows, names = erail.parse_station_board(_BOARD)
+    assert rows == [("16512", 17 * 60 + 30), ("16603", 19 * 60 + 13)]
+    assert names == {"16512": "CLT SBC EXPRESS", "16603": "MAVELI EXPRESS"}
+    assert erail.parse_station_board("<p>CLT SBC EXPRESS16512, 13.05 hr</p><p>17.30</p>")[0] == [("16512", 1050)]
+
+
+def test_station_boards_are_cached_and_also_supply_train_names():
+    session = _Session([_Resp(200, _BOARD)])
+    assert asyncio.run(erail.station_rows(session, "PAY", "Payyanur"))[0] == ("16512", 1050)
+    assert asyncio.run(erail.station_rows(session, "pay", "Payyanur"))[0] == ("16512", 1050)
+    assert session.calls == 1
+    assert erail.known_train_names(["16512"]) == {"16512": "CLT SBC EXPRESS"}
+
+
+def test_a_failed_or_unreadable_board_is_not_cached_as_no_trains():
+    session = _Session([_Resp(500), _Resp(200, "<html>Loading...</html>"), _Resp(200, _BOARD)])
+    assert asyncio.run(erail.station_rows(session, "PAY", "Payyanur")) == []
+    assert asyncio.run(erail.station_rows(session, "PAY", "Payyanur")) == []
+    assert asyncio.run(erail.station_rows(session, "PAY", "Payyanur"))[0][0] == "16512"
+    assert session.calls == 3
+
+
 def test_failed_lookup_is_not_cached():
     session = _Session([_Resp(500), _Resp(200, "~~~~~~^12624~TRICHY EXP~KUY~TUP")])
     assert asyncio.run(trains_between(session, "KUY", "TUP")) == []

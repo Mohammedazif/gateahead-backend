@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock
 
 from gateahead.models import Station, TrainPosition
 from gateahead.service import (
@@ -26,7 +27,7 @@ def test_wide_pair_uses_junctions_when_the_nearest_halt_is_unknown():
     assert pairs[0] == ("PTJ", "ED")
 
 
-def test_empty_halt_pair_still_finds_the_mail_on_the_junction_pair():
+def test_empty_halt_pair_still_finds_the_mail_on_the_junction_pair(monkeypatch):
     calls: list[tuple[str, str]] = []
 
     async def fake(session: object, origin: str, dest: str) -> list[tuple[str, int | None]]:
@@ -44,6 +45,7 @@ def test_empty_halt_pair_still_finds_the_mail_on_the_junction_pair():
         Station("ED", "Erode Junction", 11.34, 77.73),
     ]
     import gateahead.service as service
+    monkeypatch.setattr(service, "station_rows", AsyncMock(return_value=[]))
 
     original = service.train_rows
     service.train_rows = fake
@@ -56,6 +58,76 @@ def test_empty_halt_pair_still_finds_the_mail_on_the_junction_pair():
     assert found[0] == "12624"
     assert "06028" not in found or found.index("12624") < found.index("06028")
     assert ("PTJ", "ED") in calls
+
+
+def test_payyanur_express_is_found_even_when_it_skips_both_neighbouring_stations(monkeypatch):
+    import gateahead.service as service
+
+    stations = [Station("PAY", "Payyanur", 12.0919, 75.1948), Station("ELM", "Elimala", 12.0687, 75.2309), Station("TKQ", "Trikaripur", 12.1429, 75.1755)]
+    calls = []
+
+    async def board(session, code, name):
+        calls.append(code)
+        return [("16512", 17 * 60 + 30)] if code == "PAY" else []
+
+    monkeypatch.setattr(service, "station_rows", board)
+    monkeypatch.setattr(service, "train_rows", AsyncMock(return_value=[]))
+    found = asyncio.run(_discover_trains_from(None, stations, datetime(2026, 11, 16, 17, 25)))
+    assert found == ["16512"]
+    assert calls == ["PAY", "ELM"]  # Bounded station-board lookups, not a query for every halt.
+
+
+def test_one_station_can_discover_its_trains_without_a_station_pair(monkeypatch):
+    import gateahead.service as service
+
+    monkeypatch.setattr(service, "station_rows", AsyncMock(return_value=[("16512", 1050)]))
+    pairs = AsyncMock(return_value=[])
+    monkeypatch.setattr(service, "train_rows", pairs)
+    found = asyncio.run(_discover_trains_from(None, [Station("PAY", "Payyanur", 12.0919, 75.1948)]))
+    assert found == ["16512"]
+    pairs.assert_not_awaited()
+
+
+def test_cached_payyanur_route_survives_an_empty_provider_discovery(tmp_path, monkeypatch):
+    from gateahead.config import load_settings
+    from gateahead.live import LiveLook
+    from gateahead.service import GateAhead
+    from gateahead.store import Store
+    from gateahead.timetable import parse_route_rows
+    import gateahead.service as service_module
+
+    moment = datetime(2026, 11, 16, 17, 25)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls):
+            return moment
+
+    monkeypatch.setattr(service_module, "datetime", Clock)
+    stops = parse_route_rows([
+        {"station_code": "CAN", "station_name": "Kannur", "distance_from_source": "90", "sta_min": 1020, "std_min": 1025, "day": 1, "lat": 11.868, "lng": 75.363},
+        {"station_code": "PAY", "station_name": "Payyanur", "distance_from_source": "124", "sta_min": 1049, "std_min": 1050, "day": 1, "lat": 12.0919, "lng": 75.1948},
+        {"station_code": "NLE", "station_name": "Nileshwar", "distance_from_source": "144", "sta_min": 1069, "std_min": 1070, "day": 1, "lat": 12.259, "lng": 75.134},
+    ])
+    service = GateAhead.__new__(GateAhead)
+    service.settings = load_settings()
+    service.store = Store(tmp_path / "discovery.db")
+    service.store.save_route("16512", stops)
+    service._discover_trains = AsyncMock(return_value=[])
+    service.session = None
+    service.snapshots = None
+    look = LiveLook({"success": True, "current_station_code": "CAN", "cur_stn_lat": 11.868, "cur_stn_lng": 75.363,
+                     "status": "T", "train_name": "CLT SBC EXPRESS", "status_as_of_min": 0}, "", False)
+    fetch = AsyncMock(return_value=look)
+    monkeypatch.setattr(service_module, "fetch_live", fetch)
+    numbers, positions, _ = asyncio.run(service._positions([], 12.0919, 75.1948))
+    assert numbers == ["16512"]
+    assert [position.train_number for position in positions] == ["16512"]
+    fetch.assert_awaited_once()
+    # An old route or a route in a different region must not become a fallback candidate.
+    assert service.store.route_numbers_near(20, 80, 10, 24 * 7) == []
+    service.store._conn.execute("UPDATE train_routes SET fetched_at='2020-01-01T00:00:00'")
+    assert service.store.route_numbers_near(12.0919, 75.1948, 10, 24 * 7) == []
 
 
 def test_a_gate_just_past_two_kilometres_still_shows_when_it_is_closing():

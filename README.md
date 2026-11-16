@@ -39,6 +39,8 @@ Live train responses are cached for 90 seconds in SQLite, preserving their fetch
 
 Rail fragments use the closest forward connection and reject turnbacks or lateral jumps onto neighbouring parallel tracks. A train keeps its identity and travel direction across crossing views. Track placement is estimated because the source does not supply confirmed occupied-track assignments.
 
+Train discovery combines local station-pair searches with departure boards for at most two nearby stations. This includes expresses that stop at only one local station, such as 16512 at Payyanur while skipping Elimala and Trikaripur. Station boards share the ten-minute discovery cache. Up to five nearby, fresh cached timetable candidates can recover services omitted by a provider response, within the existing total cap of 30 live candidates; expired and out-of-area routes are excluded.
+
 Crossing scenes retain every identified service and expand the view for all trains in the estimated closure window. A scene train may include `track` with `estimated: true`, its own `rail`, `along_km`, `position_on_segment`, and `motion`. That path comes from the nearby connected rail only when it reaches the crossing corridor. The original top-level geometry and per-train fields remain available to existing clients. These projections add no provider requests.
 
 Train names from existing discovery and live payloads are retained in SQLite and applied to timetable-only positions, without additional provider requests. A live name takes precedence; when no official name is available, the route endpoints provide a description instead.
