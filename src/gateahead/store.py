@@ -404,14 +404,20 @@ class Store:
         self._conn.commit()
 
     def route_numbers_near(self, lat: float, lon: float, radius_km: float, max_age_hours: float) -> list[str]:
+        # Coarse candidates include legs crossing the area, even when neither
+        # endpoint stops nearby. Passage classification checks the route next.
         delta_lat = radius_km / 110.57
         delta_lon = radius_km / (111.32 * max(0.2, abs(math.cos(math.radians(lat)))))
         cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat(timespec="seconds")
         rows = self._conn.execute(
             "SELECT DISTINCT r.train_number FROM train_routes r JOIN train_stops s ON s.train_number=r.train_number "
-            "WHERE r.fetched_at >= ? AND s.lat BETWEEN ? AND ? AND s.lon BETWEEN ? AND ? "
+            "LEFT JOIN train_stops t ON t.train_number=s.train_number AND t.seq=("
+            "SELECT MIN(n.seq) FROM train_stops n WHERE n.train_number=s.train_number AND n.seq>s.seq) "
+            "WHERE r.fetched_at >= ? "
+            "AND MIN(s.lat, COALESCE(t.lat,s.lat)) <= ? AND MAX(s.lat, COALESCE(t.lat,s.lat)) >= ? "
+            "AND MIN(s.lon, COALESCE(t.lon,s.lon)) <= ? AND MAX(s.lon, COALESCE(t.lon,s.lon)) >= ? "
             "ORDER BY r.fetched_at DESC LIMIT 200",
-            (cutoff, lat - delta_lat, lat + delta_lat, lon - delta_lon, lon + delta_lon),
+            (cutoff, lat + delta_lat, lat - delta_lat, lon + delta_lon, lon - delta_lon),
         ).fetchall()
         return [row["train_number"] for row in rows]
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from datetime import datetime
+from math import cos, hypot, radians
 
 import aiohttp
 
@@ -34,6 +35,7 @@ _FETCH = 16
 _DISCOVER_CAP = 30
 _DISCOVER_BATCH = 10
 _CACHED_DISCOVER = 5
+_DISCOVERY_RADIUS_KM = 150
 _ROUTE_HOURS = 24 * 7
 _ROUTE_FETCH = 4
 _NEAR_KM = 2.0
@@ -174,7 +176,9 @@ class GateAhead:
         self, stations: list[Station], lat: float, lon: float
     ) -> tuple[list[str], list[TrainPosition], dict[str, SavedRoute]]:
         now = datetime.now()
-        numbers = await self._discover_trains(stations)
+        regional = self.store.halts_near(lat, lon, _DISCOVERY_RADIUS_KM, 800, "station")
+        discovery_stations = _discovery_stations(stations, regional, lat, lon)
+        numbers = await self._discover_trains(discovery_stations)
         nearby_routes = self.store.route_numbers_near(lat, lon, self.settings.nearby_radius_m / 1000, _ROUTE_HOURS)
         cached = self._cached_routes(list(dict.fromkeys(numbers + nearby_routes)))
         extras = [number for number in nearby_routes if number not in numbers and number in cached
@@ -483,6 +487,52 @@ def _major_station(station: Station) -> bool:
     return any(token in name for token in (" junction ", " central ", " terminus ", " terminal ", " jn "))
 
 
+def _discovery_stations(local: list[Station], regional: list[tuple[Halt, float]], lat: float, lon: float) -> list[Station]:
+    by_code = {station.code.upper(): station for station in local if station.code}
+    for halt, _distance in regional:
+        by_code.setdefault(halt.code.upper(), Station(halt.code, halt.name, halt.lat, halt.lon, halt.kind))
+    return sorted(by_code.values(), key=lambda station: km((lat, lon), station.coords))
+
+
+def _board_stations(stations: list[Station]) -> list[Station]:
+    """A local board plus regional anchors on either side, at most three requests."""
+    regular = list({station.code.upper(): station for station in stations if station.code and station.kind != "halt"}.values())
+    if not regular:
+        return []
+    home = regular[0]
+    far = [station for station in regular[1:] if km(home.coords, station.coords) >= 10]
+    if not far:
+        return regular[:2]
+    # Use the wider geographic axis so this also works on east/west stretches.
+    north_span = max(station.lat for station in regular) - min(station.lat for station in regular)
+    east_span = max(station.lon for station in regular) - min(station.lon for station in regular)
+    coordinate = (lambda station: station.lat) if north_span >= east_span else (lambda station: station.lon)
+    regional_hubs = [station for station in far if _major_station(station)]
+    anchor = min(regional_hubs, key=lambda station: km(home.coords, station.coords)) if regional_hubs else None
+    chosen = [home]
+    for side in (-1, 1):
+        pool = [station for station in far if (coordinate(station) - coordinate(home)) * side > 0]
+        majors = [station for station in pool if _major_station(station)]
+        if majors:
+            chosen.append(min(majors, key=lambda station: km(home.coords, station.coords)))
+        elif pool:
+            if anchor is not None:
+                # Avoid choosing a distant inland branch just because it falls
+                # within the regional circle. This is candidate discovery;
+                # each train's route still has to reach the gate.
+                scale = cos(radians(home.lat))
+                ax, ay = (anchor.lon - home.lon) * scale, anchor.lat - home.lat
+
+                def offset(station: Station) -> float:
+                    dx, dy = (station.lon - home.lon) * scale, station.lat - home.lat
+                    return abs(ax * dy - ay * dx) / (hypot(ax, ay) * hypot(dx, dy))
+
+                aligned = [station for station in pool if offset(station) <= 0.35]
+                pool = aligned or [min(pool, key=offset)]
+            chosen.append(max(pool, key=lambda station: km(home.coords, station.coords)))
+    return chosen
+
+
 def _pair_plan(stations: list[Station]) -> list[tuple[str, str]]:
     codes = _station_codes(stations)
     if len(codes) < 2:
@@ -503,6 +553,11 @@ def _pair_plan(stations: list[Station]) -> list[tuple[str, str]]:
 
     add(by_lat[0].code, by_lat[-1].code)
     add(by_lat[-1].code, by_lat[0].code)
+    # Junctions can lie on the same side of the gate. Also search across the
+    # whole region rather than requiring the train to stop at a local halt.
+    whole = sorted(by_code.values(), key=lambda station: station.lat)
+    add(whole[0].code, whole[-1].code)
+    add(whole[-1].code, whole[0].code)
     for other in codes[1:5]:
         add(codes[0], other)
         add(other, codes[0])
@@ -540,7 +595,7 @@ async def _discover_trains_from(
     found: list[tuple[str, int | None]] = []
     # A service may stop at only one of the nearby stations. Between-station
     # queries alone omit it (for example 16512 at PAY, skipping ELM and TKQ).
-    boards = list({station.code.upper(): station for station in stations if station.code and station.kind != "halt"}.values())[:2]
+    boards = _board_stations(stations)
     pairs = _pair_plan(stations)
     lookups = [(True, station.code, station.name) for station in boards] + [(False, origin, dest) for origin, dest in pairs]
     for start in range(0, len(lookups), _DISCOVER_BATCH):
