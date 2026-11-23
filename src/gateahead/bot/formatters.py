@@ -3,6 +3,8 @@ from __future__ import annotations
 import html
 import re
 
+from telegram.constants import MessageLimit
+
 from gateahead.clusters import cluster_crossings, maps_link, place_label
 from gateahead.models import Crossing
 from gateahead.predict import PASS_GRACE_MIN
@@ -10,6 +12,24 @@ from gateahead.predict import PASS_GRACE_MIN
 
 def h(value: object) -> str:
     return html.escape(str(value))
+
+
+def reply_pages(text: str) -> list[str]:
+    pages, lines = [], []
+    length = 0
+    limit = int(MessageLimit.MAX_TEXT_LENGTH)
+    for line in text.split("\n"):
+        if len(line) > limit:
+            plain = html.unescape(re.sub(r"</?b>", "", line))
+            line = h(plain[:600]) + "…"
+        if length + len(line) > limit:
+            pages.append("\n".join(lines))
+            lines, length = [], 0
+        lines.append(line)
+        length += len(line) + 1
+    if lines:
+        pages.append("\n".join(lines))
+    return pages
 
 
 def friendly_error(message: str | None) -> str:
@@ -43,6 +63,8 @@ def help_text() -> str:
         "<b>Place</b>\n"
         "/setlocation\n"
         "Save your position with a Telegram location or a Google Maps link.\n\n"
+        "/clearlocation\n"
+        "Remove your saved location and stop alerts.\n\n"
         "/nearby\n"
         "Show railway crossings within 10 km, with map links.\n\n"
         "<b>Trains</b>\n"
@@ -51,16 +73,16 @@ def help_text() -> str:
         "/subscribe\n"
         "Notify you when a nearby crossing is about to close. Stays on until /unsubscribe.\n\n"
         "/unsubscribe\n"
-        "Stop notifications.\n\n"
+        "Stop notifications and keep your saved location.\n\n"
         "<b>Map</b>\n"
         "/markgate\n"
-        "Add a crossing that is not listed, using a Telegram location or a Google Maps link. "
-        "You will be told if it is already on the map."
+        "Submit a missing crossing for review using a Telegram location or a maps link. "
+        "Pending pins do not appear on the public map."
     )
 
 
 def nearby_text(items: list[tuple[Crossing, float]], error: str | None = None) -> str:
-    if error:
+    if error and not items:
         return friendly_error(error)
     if not items:
         return (
@@ -71,6 +93,8 @@ def nearby_text(items: list[tuple[Crossing, float]], error: str | None = None) -
     clusters = cluster_crossings([c for c, _d in items])
     by_id = {c.id: d for c, d in items}
     lines = [f"<b>Crossings within 10 km</b> ({len(clusters)})"]
+    if error:
+        lines.append("Showing saved crossings because the map update is unavailable.")
     for cluster in clusters:
         nearest = min(by_id[c.id] for c in cluster.crossings if c.id in by_id)
         label = place_label(cluster.name, cluster.lat, cluster.lon)
@@ -97,7 +121,7 @@ def predict_text(scan: dict) -> str:
     grouped: dict[str, list] = {}
     for row in approaching:
         grouped.setdefault(run_key(row), []).append(row)
-    lines = ["<b>Live trains</b>"]
+    lines = ["<b>Train checks and crossing estimates</b>"]
     for update in scan.get("service_updates") or []:
         state = {"cancelled": "Cancelled", "diverted": "Diverted", "partially_cancelled": "Partially cancelled"}.get(update.get("status"), "Update unavailable")
         lines.append(f"• {h(update['number'])}{run_date(update)}: {state}.")
@@ -106,8 +130,12 @@ def predict_text(scan: dict) -> str:
     coverage = scan.get("coverage") or {}
     pending = coverage.get("pending_live", 0)
     discovery_unavailable = coverage.get("unavailable_discovery", 0)
-    incomplete = any(coverage.get(key, 0) for key in (
+    incomplete = coverage.get("status") == "partial" or any(coverage.get(key, 0) for key in (
         "unavailable_discovery", "pending_live", "missing_or_stale_routes", "unavailable_live"))
+    if scan.get("map_warning"):
+        lines.append("Showing saved map data. Some crossings or train estimates may be missing.")
+    elif coverage.get("deadline_exhausted"):
+        lines.append("The check timed out before all sources could reply.")
     if discovery_unavailable:
         lines.append("Some train searches could not be completed. Coverage is incomplete.")
     if pending:
@@ -119,8 +147,11 @@ def predict_text(scan: dict) -> str:
     if awaiting:
         lines.append("<b>Position update needed</b>")
         for train in awaiting:
-            lines.append(f"• {h(train['number'])} {h(train.get('name') or '')}{run_date(train)}: last reported stopped at "
-                         f"{h(train.get('current') or 'the station')}, {round(train.get('age_min', 0))} min old.")
+            reason = train.get("reason")
+            stopped = " stopped" if reason == "stopped_report" else ""
+            age = "time unconfirmed" if reason == "unknown_report_age" else f"{round(train.get('age_min') or 0)} min old"
+            lines.append(f"• {h(train['number'])} {h(train.get('name') or '')}{run_date(train)}: last reported{stopped} at "
+                         f"{h(train.get('current') or 'the station')}, {age}.")
         lines.append("Passage has not been confirmed. The barrier’s position is unknown.")
     if grouped:
         lines.append("")
@@ -142,7 +173,7 @@ def predict_text(scan: dict) -> str:
         lines.append("")
     elif live or passed:
         lines.append("Other train estimates may be missing. The barrier’s position is unknown." if incomplete
-                     else "No train is close enough to close a crossing near you right now.")
+                     else "No nearby crossing closure was estimated from the completed checks.")
         lines.append("")
     elif scan.get("service_updates"):
         lines.append("No crossing estimates are available for these journeys. The barrier’s position is unknown.")
@@ -152,7 +183,7 @@ def predict_text(scan: dict) -> str:
                      else "No live trains reported on this stretch right now.")
         return "\n".join(lines)
     if passed:
-        lines.append("<b>Just passed</b>")
+        lines.append("<b>Estimated recent passage</b>")
         for row in passed[:6]:
             title = f"{h(row['train'])} {h(row.get('name') or '')}{run_date(row)}".strip()
             lines.append(f"• {title} {passed_label(row['ago'])} at {h(row['cluster'])}")
@@ -176,13 +207,13 @@ def gate_label(eta: float | None, closes: float | None = None) -> str:
     if eta is None:
         return ""
     if eta < -PASS_GRACE_MIN:
-        return "already passed"
+        return "estimated passage"
     down_in = eta if closes is None else closes
     if down_in <= 0:
-        return "closed, train passing" if eta <= 1 else f"closed, train in {eta:.0f} min"
+        return "estimated closed, train passing" if eta <= 1 else f"estimated closed, train in {eta:.0f} min"
     if down_in < 1:
-        return "closing now"
-    return f"closes in {_span_label(down_in)}"
+        return "estimated to be closing now"
+    return f"closes in {_span_label(down_in)} (estimate)"
 
 
 def passed_label(ago: float) -> str:

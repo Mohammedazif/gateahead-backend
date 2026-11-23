@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import math
+import sqlite3
 import time
-from collections import defaultdict
+from contextlib import asynccontextmanager
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -17,11 +20,22 @@ from gateahead.clusters import gate_label
 from gateahead.config import load_settings
 from gateahead.halts import clean_code, ensure_catalog
 from gateahead.place import lookup_place
-from gateahead.service import GateAhead
+from gateahead.service import GateAhead, crossing_distances
 from gateahead.reports import Reports
 from gateahead.store import Store
 
-app = FastAPI(title="GateAhead")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        await startup()
+        yield
+    finally:
+        await shutdown()
+
+
+app = FastAPI(title="GateAhead", lifespan=lifespan)
 _origins = [item.strip() for item in os.getenv("WEB_ORIGIN", "http://localhost:5173").split(",") if item.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -30,7 +44,9 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Retry-After"],
 )
-_HITS: dict[str, list[float]] = defaultdict(list)
+_HITS: dict[str, list[float]] = {}
+_HITS_CAPACITY = 16_384
+_HITS_PRUNED_AT = float("-inf")
 _LIMIT = 20
 _WINDOW = 600.0
 _settings = load_settings()
@@ -38,22 +54,37 @@ _store = Store(_settings.db_path)
 _reports = Reports(_settings.db_path)
 _session: aiohttp.ClientSession | None = None
 _service: GateAhead | None = None
+_maintenance: asyncio.Task | None = None
+_log = logging.getLogger(__name__)
 
 
-@app.on_event("startup")
+async def _maintain_storage() -> None:
+    while True:
+        try:
+            _store.prune_retained_data()
+        except sqlite3.OperationalError:
+            _log.exception("Deferred database cleanup until the next maintenance interval")
+        await asyncio.sleep(60)
+
+
 async def startup() -> None:
-    global _session, _service
+    global _session, _service, _maintenance
     _session = aiohttp.ClientSession()
     _service = GateAhead(_settings, _store, _session)
     await ensure_catalog(_session, _store)
+    _maintenance = asyncio.create_task(_maintain_storage())
 
 
-@app.on_event("shutdown")
 async def shutdown() -> None:
+    global _maintenance, _service, _session
+    if _maintenance:
+        _maintenance.cancel()
+        await asyncio.gather(_maintenance, return_exceptions=True)
     if _service:
         await _service.snapshots.shutdown()
     if _session:
         await _session.close()
+    _maintenance = _service = _session = None
 
 
 @app.get("/health")
@@ -80,7 +111,7 @@ async def coverage() -> dict:
 
 
 @app.get("/cities")
-async def cities(q: str = Query(""), limit: int = Query(8, ge=1, le=20)) -> dict:
+async def cities(q: str = Query("", max_length=100), limit: int = Query(8, ge=1, le=20)) -> dict:
     query = " ".join(q.split())
     if len(query) < 2:
         raise HTTPException(status_code=400, detail="Search needs at least 2 letters")
@@ -187,32 +218,39 @@ async def gates(
     lon: float = Query(..., ge=-180, le=180, allow_inf_nan=False),
 ) -> dict:
     assert _service is not None
-    items, error = await _service.nearby(lat, lon)
-    if error:
-        return {"error": error, "gates": []}
+    mapped = await _service.map_around(lat, lon)
+    if mapped.error:
+        return {"error": mapped.error, "gates": []}
     return {
         "gates": [
             {"id": c.id, "name": gate_label(c), "lat": c.lat, "lon": c.lon, "km": round(d, 3), "source": c.source,
              "road": c.road, "area": c.area, "group_id": c.group_id,
              "group_name": c.group_name, "group_size": c.group_size}
-            for c, d in items
-        ]
+            for c, d in crossing_distances(mapped, lat, lon)
+        ],
+        **mapped.freshness(),
     }
 
 
 def _caller(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip() or "unknown"
+    # The server applies forwarding headers only for its configured proxy peers.
     if request.client:
         return request.client.host
     return "unknown"
 
 
 def _limit(request: Request, bucket: str = "predictions", cap: int = _LIMIT) -> None:
+    global _HITS_PRUNED_AT
     ip = f"{bucket}:{_caller(request)}"
     now = time.monotonic()
-    recent = [stamp for stamp in _HITS[ip] if now - stamp < _WINDOW]
+    if now - _HITS_PRUNED_AT >= 60:
+        for key in [key for key, hits in _HITS.items() if not hits or now - hits[-1] >= _WINDOW]:
+            del _HITS[key]
+        _HITS_PRUNED_AT = now
+    if ip not in _HITS and len(_HITS) >= _HITS_CAPACITY:
+        raise HTTPException(status_code=429, detail="Checks are busy. Please try again shortly.",
+                            headers={"Retry-After": "60"})
+    recent = [stamp for stamp in _HITS.get(ip, ()) if now - stamp < _WINDOW]
     if len(recent) >= cap:
         retry = max(1, math.ceil(_WINDOW - (now - recent[0])))
         raise HTTPException(status_code=429, detail="Slow down and try again in a few minutes.", headers={"Retry-After": str(retry)})
@@ -236,7 +274,7 @@ async def scene(
     request: Request,
     lat: float = Query(..., ge=-90, le=90, allow_inf_nan=False),
     lon: float = Query(..., ge=-180, le=180, allow_inf_nan=False),
-    crossing_id: str = Query(...),
+    crossing_id: str = Query(..., min_length=1, max_length=120),
 ) -> dict:
     _limit(request)
     assert _service is not None
@@ -253,7 +291,10 @@ class GateReport(BaseModel):
 
 @app.get("/reports")
 async def reports(crossing_id: str = Query(..., min_length=1, max_length=120)) -> dict:
-    return _reports.recent(crossing_id)
+    canonical_id = _store.canonical_crossing_id(crossing_id)
+    if canonical_id.startswith("pin:") and not _store.is_public_pin(canonical_id):
+        return _reports.empty()
+    return _reports.recent(canonical_id)
 
 
 @app.post("/reports")
@@ -261,8 +302,9 @@ async def report(request: Request, body: GateReport) -> dict:
     _limit(request, "reports", 10)
     assert _service is not None
     mapped = await _service.map_around(body.lat, body.lon)
-    if mapped.error:
+    if mapped.error or getattr(mapped, "map_warning", None):
         raise HTTPException(status_code=503, detail="Crossing could not be verified. Try again later.")
-    if not any(gate.id == body.crossing_id for gate in mapped.crossings):
+    canonical_id = _store.canonical_crossing_id(body.crossing_id)
+    if not any(gate.id == canonical_id for gate in mapped.crossings):
         raise HTTPException(status_code=404, detail="Crossing not found at this location.")
-    return _reports.submit(body.crossing_id, body.installation_id, body.state)
+    return _reports.submit(canonical_id, body.installation_id, body.state)

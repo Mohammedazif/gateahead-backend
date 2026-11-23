@@ -30,7 +30,7 @@ def check_pin(
     if not has_highway:
         return PinCheck(
             "candidate",
-            "Saved. It sits on the railway; we will treat it as a candidate crossing.",
+            "Saved as a private candidate. A public road crossing still needs to be confirmed.",
             rail_m,
         )
-    return PinCheck("candidate", "Saved as a crossing near the railway.", rail_m)
+    return PinCheck("candidate", "Saved as a private candidate for crossing review.", rail_m)

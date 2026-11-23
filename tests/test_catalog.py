@@ -215,7 +215,7 @@ def test_simultaneous_locations_keep_their_own_coverage(tmp_path):
         [Crossing("g", "Gate", 12.15, 75.2, "osm")], [], [], False,
     ))
 
-    async def positions(stations, lat, lon):
+    async def positions(stations, lat, lon, *, deadline=None):
         await asyncio.sleep(0)
         return PositionBatch([], [], {}, {"live_checked": int(lat), "pending_live": int(lat) + 1})
 

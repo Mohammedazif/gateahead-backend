@@ -10,7 +10,8 @@ Crossings and trains are fetched from the user's location. There is no hardcoded
 2. `/nearby` — OpenStreetMap crossings around them.
 3. `/predict` — trains on that stretch (erail train list + RailYatri live status).
 4. `/subscribe` — ping when a nearby cluster is about to close.
-5. `/markgate` — GPS at a missing barrier. Rejected if not on a railway track.
+5. `/markgate` — submit a missing crossing for review. Pending pins remain private.
+6. `/clearlocation` — erase the saved Telegram location and stop alerts.
 
 ## Run
 
@@ -31,6 +32,10 @@ uvicorn gateahead.api.app:app --host 0.0.0.0 --port 8000
 
 The website calls this API under `/api`.
 
+The API uses the peer address resolved by Uvicorn for rate limiting. If it runs
+behind a reverse proxy, set `FORWARDED_ALLOW_IPS` to the actual trusted proxy
+addresses or networks in that deployment.
+
 ## Shared snapshots and community reports
 
 Live train responses are cached for 90 seconds in SQLite, preserving their fetch time so report age continues increasing between checks. API and bot processes using the same database share snapshots and fetch leases, including concurrent checks. Separate hosts need a shared storage design before they can share this cache. The cache reduces provider traffic; it does not improve source freshness or establish an upstream request allowance.
@@ -45,7 +50,7 @@ Train discovery combines station-pair searches with at most three departure boar
 
 Malformed map responses and nonfinite map geometry fail over to the next map provider instead of becoming a successful empty map. A valid empty map remains valid. Expected network, timeout, or decoding failures in a train lookup do not discard healthy services from the same request; failed timetable retrievals retain their refresh backoff. Request cancellation still propagates, and a canceled caller cannot cancel another caller's shared live fetch.
 
-Map mirrors share a 75-second lookup budget, with each attempt limited to at most 30 seconds or the remaining budget. This leaves room within the browser's 90-second request window instead of stacking three full mirror timeouts. A stale cached map remains available if all attempts fail; cancellation stops the lookup rather than continuing through the mirrors.
+Map mirrors share a 75-second lookup budget. Train requests give map, discovery, live reports and timetable refresh an 84-second combined window. Completed lookups remain available when another lookup runs out of time. A cached map can be reused for up to 24 hours when all mirrors fail. Retained data includes `map_warning`, with `map_age_seconds` when the last map fetch time is available. Prediction `coverage.status` describes completeness for this check and remains separate from nationwide coverage.
 
 Routes older than `ROUTE_MAX_AGE_HOURS` (default 168) remain discovery hints but cannot provide timetable estimates until refreshed. Failed refreshes retain their previous data and back off. Gate ETAs use route position, direction, report age, and timetable interpolation; the gate's nearest station need not be a scheduled stop. A current moving report takes precedence over schedule eligibility. Operating weekdays refer to the origin departure date, including journeys lasting three or more days. Closure remains an estimate based on the configured lead time, not a barrier observation.
 
@@ -58,6 +63,10 @@ Crossing scenes retain every identified service and expand the view for all trai
 Train names from existing discovery and live payloads are retained in SQLite and applied to timetable-only positions, without additional provider requests. A live name takes precedence; when no official name is available, the route endpoints provide a description instead.
 
 `GET /reports?crossing_id=...` returns recent, unverified community observations. `POST /reports` accepts `crossing_id`, `installation_id`, `state` (`open`, `closed`, or `wrong_location`), `lat`, and `lon`. Submissions are checked against the mapped crossing, replace that installation's previous observation for the same gate, and expire after ten minutes. Installation identifiers are hashed and excluded from responses. Reports do not alter predictions or train alerts.
+
+Public user pins have opaque IDs. Existing links to previously public pins
+resolve to their replacements through `/scene` and `/reports`. Scene responses
+set `legacy_alias_resolved` when a legacy request resolves to an opaque ID.
 
 Predictions and scenes retain their shared limit of 20 requests per IP per ten minutes and now return `Retry-After` when limited. Report submissions have a separate limit of ten per IP per ten minutes. Listing reports does not fetch train data.
 
@@ -155,6 +164,8 @@ These changes recognize exceptions supplied by the provider. They cannot discove
 A train stays `closed` until 2 minutes after its estimated arrival, because the barrier stays down while it clears the road. After that it moves to the `passed` list for 5 minutes, where `ago` / `ago_min` says how many minutes ago it went over.
 
 A stopped report is held at its reported station; its age is never treated as travel time. Its estimated arrival cannot become earlier than the remaining run from that station. If the report is at least eight minutes old and the crossing is still ahead, `/predict` and `/scene` put the train in `awaiting_update` with its last reported station, age, and affected crossing IDs. It receives no passing or closure countdown and is not moved to `passed` by the timer. Clients show “Position update needed” and label other services as other reported trains. A newer moving report restores an estimate; a reported position beyond the gate can establish estimated passage. Stopped scene/list estimates also stop counting down in the browser and become unresolved at the same eight-minute age limit. Arrivals and departures at intermediate timetable stops use their respective clocks.
+
+Stale moving reports and reports without a known source age can also require a position update. A timetable-only estimate has `observed: false`. Passage is tied to evidence for the individual crossing and follows the same clearance window as approaching trains.
 
 The development-only minute-by-minute simulator lives in [`simulator/`](simulator/README.md). It is excluded from the application package. Running `pytest` from this repository runs both backend and simulator tests. The combined workspace audit and scenario inventory are in [`docs/qa/`](docs/qa/TEST_REPORT.txt); those reports also describe the separately versioned website and Flutter checks.
 

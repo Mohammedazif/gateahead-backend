@@ -81,7 +81,7 @@ def test_frozen_stopped_report_stays_visible_and_recovers_without_a_false_passag
         assert look.app_status == look.scene_status == "awaiting_update", timeline(scenario, looks)
         assert look.app_eta is None and look.scene_eta is None
         assert look.app_passed is None and look.scene_passed is None
-        assert any(train == "16603" for train, _eta, _status in look.others)
+        assert any(run_id.startswith("16603:") for run_id, _eta, _status in look.others)
     recovered = next(look for look in looks if look.minute == 632)
     assert recovered.app_status != "awaiting_update"
     assert recovered.app_passed is not None
@@ -134,3 +134,9 @@ def test_held_stopped_estimate_cannot_hide_an_arbitrarily_wrong_eta():
     impossible = replace(look, app_eta=999, scene_eta=999, app_status="later", scene_status="later")
     assert "SAYS_OPEN" in judge(impossible, scenario.tolerance)
     assert any(issue.startswith("OFF") for issue in judge(impossible, scenario.tolerance))
+
+
+def test_judge_rejects_inconsistent_and_impossible_passage_ages():
+    scenario, looks = _looks("waiting_at_gate", minutes=[633.0])
+    look = replace(looks[0], app_passed=999, scene_passed=-1)
+    assert {"INVALID_ESTIMATE", "DISAGREEMENT"} <= set(judge(look, scenario.tolerance))

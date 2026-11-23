@@ -198,10 +198,13 @@ def test_wrong_date_report_cannot_be_relabelled_or_fall_back_to_timetable(monkey
     monkeypatch.setattr(live, "datetime", Clock)
     fetch = AsyncMock(return_value={"success": True, "train_start_date": "2026-11-16", "current_station_code": "AAA"})
     monkeypatch.setattr(live, "_fetch_lts_api", fetch)
+    page = AsyncMock(return_value=None)
+    monkeypatch.setattr(live, "_fetch_lts_page", page)
     look = asyncio.run(live.fetch_run(None, "16512", date(2026, 11, 15)))
     assert look.operating_status == "unknown"
     assert resolve_position("16512", look, SavedRoute(stops()), NOW) is None
     assert fetch.await_args.args[2] == 1
+    page.assert_awaited_once_with(None, "16512", date(2026, 11, 15))
 
 
 @pytest.mark.parametrize("state", ["cancelled", "diverted", "partially_cancelled"])

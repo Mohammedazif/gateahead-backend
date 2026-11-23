@@ -229,7 +229,7 @@ def test_gates_api_exposes_group_metadata_without_collapsing_original_ids(monkey
     a, b = node(1, 75), node(2, 75.00005)
     crossings = parse(a, b, road(10, [a, b]))
     service = AsyncMock()
-    service.nearby.return_value = ([(c, 0) for c in crossings], None)
+    service.map_around.return_value = OsmAround(crossings, [], [], True)
     monkeypatch.setattr(api, "_service", service)
 
     async def run():

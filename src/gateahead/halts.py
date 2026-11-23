@@ -32,11 +32,8 @@ def halt_kind(name: str) -> str:
 
 
 def parse_station_catalog(payload: object) -> list[Halt]:
-    if isinstance(payload, dict):
-        features = payload.get("features") or []
-    elif isinstance(payload, list):
-        features = payload
-    else:
+    features = payload.get("features") if isinstance(payload, dict) else payload
+    if not isinstance(features, list):
         return []
     found: dict[str, Halt] = {}
     for feature in features:

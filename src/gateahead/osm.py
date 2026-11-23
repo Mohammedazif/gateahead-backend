@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import aiohttp
 
@@ -22,6 +22,8 @@ OVERPASS_HEADERS = {
     "Accept": "application/json",
 }
 _CACHE_TTL = 900.0
+_MAX_STALE_AGE = 24 * 60 * 60
+_CACHE_CAPACITY = 256
 _LOOKUP_BUDGET = 75.0
 _ATTEMPT_TIMEOUT = 30.0
 _cache: dict[tuple[float, float, int], tuple[float, "OsmAround"]] = {}
@@ -36,6 +38,17 @@ class OsmAround:
     error: str | None = None
     excluded_crossing_ids: set[str] = field(default_factory=set)
     excluded_crossing_points: set[tuple[float, float]] = field(default_factory=set)
+    map_warning: str | None = None
+    map_age_seconds: int | None = None
+    cached: bool = field(default=False, compare=False)
+
+    def freshness(self) -> dict:
+        data = {}
+        if self.map_warning:
+            data["map_warning"] = self.map_warning
+        if self.map_age_seconds is not None:
+            data["map_age_seconds"] = self.map_age_seconds
+        return data
 
 
 def _around_query(lat: float, lon: float, radius_m: float) -> str:
@@ -77,6 +90,12 @@ def parse_overpass(payload: dict, origin: tuple[float, float]) -> tuple[list[Cro
     for el in elements:
         if not isinstance(el, dict):
             raise ValueError("Map provider returned an invalid element")
+        if (type(el.get("id")) is not int or el.get("type") not in ("node", "way", "relation")
+                or any(el.get(key) is not None and not isinstance(el[key], list)
+                       for key in ("nodes", "geometry"))
+                or any(type(node) is not int for node in el.get("nodes") or [])
+                or any(point is not None and not isinstance(point, dict) for point in el.get("geometry") or [])):
+            raise ValueError("Map provider returned invalid element geometry")
         if el.get("tags") is not None and not isinstance(el["tags"], dict):
             raise ValueError("Map provider returned invalid tags")
         tags = el.get("tags") or {}
@@ -177,7 +196,7 @@ class OsmClient:
         cached = _cache.get(key)
         now = time.monotonic()
         if cached and now - cached[0] < _CACHE_TTL:
-            return cached[1]
+            return replace(cached[1], cached=True)
         query = _around_query(lat, lon, radius_m)
         deadline = now + _LOOKUP_BUDGET
         last_error = "map_busy"
@@ -220,8 +239,14 @@ class OsmClient:
             excluded_points = {candidates[key] for key in excluded} - {c.coords for c in crossings}
             result = OsmAround(crossings, stations, rails, has_highway,
                                excluded_crossing_ids=excluded, excluded_crossing_points=excluded_points)
-            _cache[key] = (now, result)
+            _cache.pop(key, None)
+            _cache[key] = (time.monotonic(), result)
+            if len(_cache) > _CACHE_CAPACITY:
+                _cache.pop(next(iter(_cache)))
             return result
         if cached:
-            return cached[1]
+            age = time.monotonic() - cached[0]
+            if age <= _MAX_STALE_AGE:
+                return replace(cached[1], map_warning=last_error, map_age_seconds=int(age), cached=True)
+            _cache.pop(key, None)
         return OsmAround([], [], [], False, last_error)

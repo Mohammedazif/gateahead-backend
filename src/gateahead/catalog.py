@@ -17,7 +17,7 @@ from gateahead.config import load_settings
 from gateahead.erail import known_train_names, station_rows
 from gateahead.halts import ensure_catalog, parse_station_catalog
 from gateahead.store import Store
-from gateahead.timetable import fetch_timetable, locate_stops
+from gateahead.timetable import fetch_timetable, locate_route
 
 
 async def sync_catalog(
@@ -81,11 +81,11 @@ async def sync_catalog(
                    else store.due_routes(route_limit, route_refresh_hours))
         for number in numbers[:route_limit]:
             await pace()
-            stops, run_days = await fetch_timetable(session, number)
-            store.record_provider("railyatri:timetable", len(stops) >= 2, "unavailable_or_unparseable" if len(stops) < 2 else "")
-            if len(stops) >= 2:
-                stops = locate_stops(stops, store.halt_coords([s.code for s in stops if s.lat is None or s.lon is None]))
-                store.save_route(number, stops, run_days)
+            schedule = locate_route(await fetch_timetable(session, number), store.halt_coords)
+            valid = len(schedule.stops) >= 2
+            store.record_provider("railyatri:timetable", valid, "" if valid else "unavailable_or_unparseable")
+            if valid:
+                store.save_route(number, schedule.stops, schedule.run_days, variants=schedule.variants)
                 result["routes_refreshed"] += 1
                 failures = 0
             else:

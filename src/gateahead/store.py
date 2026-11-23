@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -7,11 +8,23 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Iterable
+from contextlib import closing
+from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from gateahead.geo import km
 from gateahead.models import Crossing, Halt, RouteStop, SavedRoute, User
+
+_LEGACY_PIN_ID = re.compile(r"user:[0-9]+:[0-9]+\Z")
+
+
+def new_crossing_id() -> str:
+    return f"pin:{uuid.uuid4().hex}"
+
+
+def _legacy_crossing_key(crossing_id: str) -> bytes:
+    return hashlib.sha256(crossing_id.encode()).digest()
 
 
 class Store:
@@ -46,6 +59,11 @@ class Store:
               added_by INTEGER
             );
             CREATE INDEX IF NOT EXISTS crossings_lat ON crossings(lat);
+            CREATE INDEX IF NOT EXISTS crossings_osm_id ON crossings(osm_id);
+            CREATE TABLE IF NOT EXISTS crossing_aliases (
+              legacy_key BLOB PRIMARY KEY,
+              crossing_id TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS alerts (
               key TEXT PRIMARY KEY,
               sent_at TEXT NOT NULL
@@ -67,7 +85,8 @@ class Store:
             CREATE TABLE IF NOT EXISTS train_routes (
               train_number TEXT PRIMARY KEY,
               fetched_at TEXT NOT NULL,
-              run_days TEXT NOT NULL DEFAULT ''
+              run_days TEXT NOT NULL DEFAULT '',
+              variants TEXT NOT NULL DEFAULT '[]'
             );
             CREATE TABLE IF NOT EXISTS train_names (
               train_number TEXT PRIMARY KEY,
@@ -112,6 +131,7 @@ class Store:
               consecutive_failures INTEGER NOT NULL DEFAULT 0, last_attempt REAL, last_success REAL, last_error TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS run_checks (run_id TEXT PRIMARY KEY, checked_at REAL NOT NULL);
+            CREATE INDEX IF NOT EXISTS run_checks_checked_at ON run_checks(checked_at);
             CREATE TABLE IF NOT EXISTS route_segments (
               id INTEGER PRIMARY KEY,
               train_number TEXT NOT NULL,
@@ -127,9 +147,13 @@ class Store:
             END;
             """
         )
+        # Catalog, API and bot may initialize a shared older store at the same time.
+        self._conn.execute("BEGIN IMMEDIATE")
         columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(train_routes)")}
         if "run_days" not in columns:
             self._conn.execute("ALTER TABLE train_routes ADD COLUMN run_days TEXT NOT NULL DEFAULT ''")
+        if "variants" not in columns:
+            self._conn.execute("ALTER TABLE train_routes ADD COLUMN variants TEXT NOT NULL DEFAULT '[]'")
         scan_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(station_scans)")}
         for column in ("last_error", "source"):
             if column not in scan_columns:
@@ -140,11 +164,58 @@ class Store:
             "SELECT train_number, ?, 'cache' FROM train_routes", (time.time(),),
         )
         if self.meta("route_segment_index") != "1":
-            for row in self._conn.execute("SELECT train_number FROM train_routes").fetchall():
+            for row in self._conn.execute("SELECT train_number, variants FROM train_routes").fetchall():
                 stops = self._conn.execute("SELECT * FROM train_stops WHERE train_number=? ORDER BY seq", (row[0],)).fetchall()
-                self._index_route(row[0], [_route_stop(stop) for stop in stops])
+                self._index_route(row[0], [_route_stop(stop) for stop in stops], decode_route_variants(row[1]))
             self._conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('route_segment_index', '1')")
-        self._conn.commit()
+        self.migrate_crossing_ids()
+
+    def migrate_crossing_ids(self) -> None:
+        """Replace legacy public identifiers while accepting existing links."""
+        with self._conn:
+            if not self._conn.in_transaction:
+                self._conn.execute("BEGIN IMMEDIATE")
+            legacy_rows = self._conn.execute(
+                "SELECT id FROM crossings WHERE source='user' AND id GLOB 'user:*:*'"
+            ).fetchall()
+            has_reports = self._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='gate_reports'"
+            ).fetchone()
+            for (old,) in legacy_rows:
+                if not _LEGACY_PIN_ID.fullmatch(old):
+                    continue
+                key = _legacy_crossing_key(old)
+                alias = self._conn.execute(
+                    "SELECT crossing_id FROM crossing_aliases WHERE legacy_key=?", (key,)
+                ).fetchone()
+                if alias is None:
+                    new = new_crossing_id()
+                    self._conn.execute("INSERT INTO crossing_aliases VALUES (?, ?)", (key, new))
+                    self._conn.execute("UPDATE crossings SET id=? WHERE id=?", (new, old))
+                else:
+                    new = alias[0]
+                    self._conn.execute("DELETE FROM crossings WHERE id=? AND EXISTS "
+                                       "(SELECT 1 FROM crossings WHERE id=?)", (old, new))
+                    self._conn.execute("UPDATE crossings SET id=? WHERE id=?", (new, old))
+                if has_reports:
+                    self._conn.execute("UPDATE OR IGNORE gate_reports SET crossing_id=? WHERE crossing_id=?", (new, old))
+                    self._conn.execute("DELETE FROM gate_reports WHERE crossing_id=?", (old,))
+                self._conn.execute("UPDATE users SET crossing_ids=REPLACE(crossing_ids, ?, ?) "
+                                   "WHERE INSTR(crossing_ids, ?) > 0", (json.dumps(old), json.dumps(new), json.dumps(old)))
+
+    def canonical_crossing_id(self, crossing_id: str) -> str:
+        if _LEGACY_PIN_ID.fullmatch(crossing_id):
+            alias = self._conn.execute(
+                "SELECT crossing_id FROM crossing_aliases WHERE legacy_key=?", (_legacy_crossing_key(crossing_id),)
+            ).fetchone()
+            if alias is not None:
+                return alias[0]
+        return crossing_id
+
+    def is_public_pin(self, crossing_id: str) -> bool:
+        return self._conn.execute(
+            "SELECT 1 FROM crossings WHERE id=? AND source='user' AND status='public'", (crossing_id,),
+        ).fetchone() is not None
 
     def get_user(self, user_id: int) -> User:
         row = self._conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
@@ -194,6 +265,12 @@ class Store:
         user.crossing_ids = crossing_ids if subscribed else []
         return self.upsert_user(user)
 
+    def clear_user_location(self, user_id: int) -> None:
+        with self._conn:
+            self._conn.execute("UPDATE users SET lat=NULL, lon=NULL, subscribed=0, crossing_ids='[]' WHERE user_id=?",
+                               (user_id,))
+            self._conn.execute("DELETE FROM alerts WHERE key LIKE ?", (f"{user_id}:%",))
+
     def subscribed_users(self) -> list[User]:
         rows = self._conn.execute("SELECT user_id FROM users WHERE subscribed = 1").fetchall()
         return [self.get_user(row["user_id"]) for row in rows]
@@ -223,7 +300,8 @@ class Store:
 
     def public_crossings(self) -> list[Crossing]:
         rows = self._conn.execute(
-            "SELECT * FROM crossings WHERE status IN ('public', 'pending')"
+            "SELECT * FROM crossings WHERE status IN ('public', 'pending') "
+            "AND (status='public' OR source!='user')"
         ).fetchall()
         return [_crossing(row) for row in rows]
 
@@ -238,8 +316,8 @@ class Store:
         Only this reversible status is restored by later public map evidence;
         moderation rejections remain intact.
         """
-        with self._conn:
-            self._conn.executemany(
+        with closing(sqlite3.connect(self.path, timeout=0)) as connection, connection:
+            connection.executemany(
                 """UPDATE crossings SET status='public'
                    WHERE source != 'user' AND status='restricted'
                      AND (id=? OR osm_id=?)""",
@@ -247,7 +325,7 @@ class Store:
             )
             # Imported records can have the same coordinates without an OSM ID.
             # Allow coordinate rounding and keep neighbouring tracks distinct.
-            self._conn.executemany(
+            connection.executemany(
                 """UPDATE crossings SET status=?
                    WHERE source='irgeoportal'
                      AND lat BETWEEN ? - 0.000001 AND ? + 0.000001
@@ -262,7 +340,7 @@ class Store:
                     for lat, lon in points
                 ],
             )
-            self._conn.executemany(
+            connection.executemany(
                 """UPDATE crossings SET status='restricted'
                    WHERE source != 'user' AND status IN ('public', 'pending')
                      AND (id=? OR osm_id=?)""",
@@ -277,6 +355,7 @@ class Store:
             """
             SELECT * FROM crossings
             WHERE status IN ('public', 'pending')
+              AND (status='public' OR source!='user')
               AND lat BETWEEN ? AND ?
               AND lon BETWEEN ? AND ?
             """,
@@ -365,7 +444,16 @@ class Store:
         self._conn.commit()
 
     def upsert_halts(self, halts: list[Halt]) -> None:
-        self._conn.executemany(
+        with self._conn:
+            self._upsert_halts(self._conn, halts)
+
+    def remember_map_halts(self, halts: list[Halt]) -> None:
+        with closing(sqlite3.connect(self.path, timeout=0)) as connection, connection:
+            self._upsert_halts(connection, halts)
+
+    @staticmethod
+    def _upsert_halts(connection: sqlite3.Connection, halts: list[Halt]) -> None:
+        connection.executemany(
             """
             INSERT INTO halts (code, name, lat, lon, kind, zone, source)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -383,7 +471,6 @@ class Store:
                 if halt.code
             ],
         )
-        self._conn.commit()
 
     def remember_stop_halts(self, stops: list[RouteStop], *, commit: bool = True) -> int:
         from gateahead.halts import clean_code, halt_kind
@@ -463,9 +550,13 @@ class Store:
         ).fetchall()
         return {row["train_number"]: row["name"] for row in rows}
 
-    def save_route(self, number: str, stops: list[RouteStop], run_days: str = "", *, fetched_at: str | None = None) -> None:
-        if len(stops) < 2:
+    def save_route(
+        self, number: str, stops: list[RouteStop], run_days: str = "", *, fetched_at: str | None = None,
+        variants: tuple[SavedRoute, ...] = (),
+    ) -> None:
+        if len(stops) < 2 or any(len(variant.stops) < 2 for variant in variants):
             raise ValueError("A route needs at least two points")
+        variants_json = json.dumps([asdict(variant) for variant in variants], separators=(",", ":"))
         with self._conn:
             self._conn.execute("DELETE FROM train_stops WHERE train_number = ?", (number,))
             self._conn.executemany(
@@ -475,33 +566,39 @@ class Store:
                   s.halt_min, int(s.stops), s.lat, s.lon) for s in stops],
             )
             self._conn.execute(
-                "INSERT INTO train_routes (train_number, fetched_at, run_days) VALUES (?, ?, ?) "
-                "ON CONFLICT(train_number) DO UPDATE SET fetched_at=excluded.fetched_at, "
-                "run_days=CASE WHEN excluded.run_days='' THEN train_routes.run_days ELSE excluded.run_days END",
-                (number, fetched_at or datetime.now().isoformat(timespec="seconds"), run_days or ""),
+                "INSERT INTO train_routes (train_number, fetched_at, run_days, variants) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(train_number) DO UPDATE SET fetched_at=excluded.fetched_at, variants=excluded.variants, "
+                "run_days=CASE WHEN excluded.run_days='' AND excluded.variants='[]' "
+                "THEN train_routes.run_days ELSE excluded.run_days END",
+                (number, fetched_at or datetime.now().isoformat(timespec="seconds"), run_days or "", variants_json),
             )
             self._conn.execute(
                 "INSERT INTO train_catalog (train_number, discovered_at, source) VALUES (?, ?, 'timetable') "
                 "ON CONFLICT(train_number) DO UPDATE SET retry_after=0, failures=0", (number, time.time()),
             )
-            self._index_route(number, stops)
+            self._index_route(number, stops, variants)
             self.remember_stop_halts(stops, commit=False)
+            for variant in variants:
+                self.remember_stop_halts(variant.stops, commit=False)
 
-    def _index_route(self, number: str, stops: list[RouteStop]) -> None:
+    def _index_route(self, number: str, stops: list[RouteStop], variants: tuple[SavedRoute, ...] = ()) -> None:
         self._conn.execute("DELETE FROM route_segments WHERE train_number=?", (number,))
-        located = [s for s in stops if s.lat is not None and s.lon is not None
-                   and math.isfinite(s.lat) and math.isfinite(s.lon)]
-        for start, end in zip(located, located[1:]):
-            if end.km - start.km < 0.05:
-                continue
-            cursor = self._conn.execute(
-                "INSERT INTO route_segments (train_number, seq) VALUES (?, ?)", (number, start.seq),
-            )
-            self._conn.execute(
-                "INSERT INTO route_segment_bounds VALUES (?, ?, ?, ?, ?)",
-                (cursor.lastrowid, min(start.lat, end.lat), max(start.lat, end.lat),
-                 min(start.lon, end.lon), max(start.lon, end.lon)),
-            )
+        sequence = 0
+        for route in (stops, *(variant.stops for variant in variants)):
+            located = [s for s in route if s.lat is not None and s.lon is not None
+                       and math.isfinite(s.lat) and math.isfinite(s.lon)]
+            for start, end in zip(located, located[1:]):
+                if end.km - start.km < 0.05:
+                    continue
+                cursor = self._conn.execute(
+                    "INSERT INTO route_segments (train_number, seq) VALUES (?, ?)", (number, sequence),
+                )
+                sequence += 1
+                self._conn.execute(
+                    "INSERT INTO route_segment_bounds VALUES (?, ?, ?, ?, ?)",
+                    (cursor.lastrowid, min(start.lat, end.lat), max(start.lat, end.lat),
+                     min(start.lon, end.lon), max(start.lon, end.lon)),
+                )
 
     def route_numbers_near(self, lat: float, lon: float, radius_km: float, max_age_hours: float | None) -> list[str]:
         delta_lat = radius_km / 110.57
@@ -518,7 +615,7 @@ class Store:
 
     def load_route(self, number: str, max_age_hours: float | None) -> SavedRoute | None:
         row = self._conn.execute(
-            "SELECT fetched_at, run_days FROM train_routes WHERE train_number = ?",
+            "SELECT fetched_at, run_days, variants FROM train_routes WHERE train_number = ?",
             (number,),
         ).fetchone()
         if row is None:
@@ -533,7 +630,7 @@ class Store:
             "SELECT * FROM train_stops WHERE train_number = ? ORDER BY seq",
             (number,),
         ).fetchall()
-        return SavedRoute([_route_stop(item) for item in rows], str(row["run_days"] or ""))
+        return SavedRoute([_route_stop(item) for item in rows], str(row["run_days"] or ""), decode_route_variants(row["variants"]))
 
     def remember_train_candidates(self, numbers: list[str], source: str = "discovery") -> None:
         stamp = time.time()
@@ -621,6 +718,25 @@ class Store:
     def release_catalog(self, owner: str) -> None:
         with self._conn:
             self._conn.execute("DELETE FROM catalog_lock WHERE owner=?", (owner,))
+
+    def prune_retained_data(self) -> None:
+        from gateahead.reports import Reports
+
+        now = time.time()
+        with closing(sqlite3.connect(self.path, timeout=0)) as db, db:
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if "gate_reports" in tables:
+                db.execute("DELETE FROM gate_reports WHERE rowid IN "
+                           "(SELECT rowid FROM gate_reports WHERE created_at <= ? LIMIT 1000)", (now - Reports.ttl,))
+            if "provider_snapshots" in tables:
+                db.execute("DELETE FROM provider_snapshots WHERE rowid IN (SELECT rowid FROM provider_snapshots "
+                           "WHERE expires <= ? AND lease_until <= ? LIMIT 1000)",
+                           (now - 86_400, now - 120))
+            db.execute("DELETE FROM run_checks WHERE rowid IN "
+                       "(SELECT rowid FROM run_checks WHERE checked_at <= ? LIMIT 1000)", (now - 8 * 86_400,))
+            old = (datetime.now() - timedelta(days=8)).isoformat(timespec="seconds")
+            db.execute("DELETE FROM alerts WHERE rowid IN "
+                       "(SELECT rowid FROM alerts WHERE sent_at < ? LIMIT 1000)", (old,))
 
     def record_provider(self, provider: str, success: bool, error: str = "") -> None:
         with self._conn:
@@ -768,6 +884,11 @@ class Store:
 
 def _like_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def decode_route_variants(raw: str) -> tuple[SavedRoute, ...]:
+    return tuple(SavedRoute([RouteStop(**stop) for stop in route["stops"]], route["run_days"])
+                 for route in json.loads(raw))
 
 
 def _route_stop(row: sqlite3.Row) -> RouteStop:

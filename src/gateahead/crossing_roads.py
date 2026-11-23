@@ -37,7 +37,7 @@ def _public_road(tags: dict) -> bool:
     if not highway or highway in _NON_ROADS or _access(tags) in _RESTRICTED:
         return False
     if highway in _FOOTWAYS:
-        return tags.get("motor_vehicle", "").lower() in _MOTOR_ACCESS
+        return (tags.get("motor_vehicle") or "").lower() in _MOTOR_ACCESS
     return True
 
 

@@ -4,7 +4,7 @@ from gateahead.config import Settings
 from gateahead.clusters import gate_label
 from gateahead.geo import along_route, stitch_rail
 from gateahead.models import Crossing, RouteStop, TrainPosition
-from gateahead.gatecall import awaiting_report, crossing_call, passed_ago, standing
+from gateahead.gatecall import RailTopology, awaiting_report, crossing_call, passed_ago, standing
 from gateahead.predict import JUST_PASSED_MIN, REPORT_FRESH_MIN, closes_in
 from gateahead.timetable import BEND_HALF_KM, list_status
 
@@ -37,9 +37,11 @@ def build_scene(
         return body
     trains = []
     gone = []
+    routes = routes or {}
+    topology = RailTopology(rails)
     for position in positions:
-        stops = (routes or {}).get(position.train_number)
-        chosen = crossing_call(position, crossing, rails, stations, settings, stops, bend)
+        stops = routes.get(position.run_id, routes.get(position.train_number))
+        chosen = crossing_call(position, crossing, rails, stations, settings, stops, bend, topology)
         if chosen.awaiting_update:
             body["awaiting_update"].append(awaiting_report(position, [crossing.id]))
             continue
@@ -59,6 +61,7 @@ def build_scene(
             "closes_in_min": round(closes_in(eta, settings), 1),
             "status": status,
             "basis": chosen.source,
+            "observed": position.observed,
             "age_min": round(position.age_minutes, 1),
             "snapshot_at": position.as_of.timestamp(),
             "movement": "stopped" if standing(position) else "moving",
@@ -88,14 +91,14 @@ def build_scene(
         position = positions_by_number[row["run_id"]]
         along, offset = along_route(drawn, position.coords)
         row["along_km"] = round(along, 3)
-        row["position_on_segment"] = offset <= 0.15
+        row["position_on_segment"] = position.observed and offset <= 0.15
         if row.get("motion") and abs(row["eta_min"]) <= settings.closing_soon_eta_min:
             candidate = stitch_rail(rails, position.coords, half_km=BEND_HALF_KM)
             # Use a train's nearby connected line only when it reaches this
             # crossing corridor. This remains an estimate, not track occupancy.
             if candidate and along_route(candidate, crossing.coords)[1] <= 0.04:
                 track_rail = stitch_rail([candidate], crossing.coords, half_km=half_km)
-                stops = (routes or {}).get(position.train_number) or []
+                stops = routes.get(position.run_id, routes.get(position.train_number)) or []
                 motion = _motion(position, candidate, stations, stops, settings)
                 if track_rail and motion:
                     track_along, track_off = along_route(track_rail, position.coords)
@@ -130,7 +133,8 @@ def _motion(
     This is an estimated position, not a replay or a GPS observation. A short
     validity window prevents a cached scene from drifting indefinitely.
     """
-    if standing(position) or position.age_minutes >= REPORT_FRESH_MIN or settings.default_speed_kmh <= 0:
+    if (not position.observed or not position.report_age_known or standing(position)
+            or position.age_minutes >= REPORT_FRESH_MIN or settings.default_speed_kmh <= 0):
         return None
     points = {stop.code.upper(): (stop.lat, stop.lon) for stop in stops if stop.lat is not None and stop.lon is not None}
     points.update(stations)

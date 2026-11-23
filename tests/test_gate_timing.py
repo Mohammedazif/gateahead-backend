@@ -113,12 +113,12 @@ def test_the_barrier_is_down_for_the_lead_time_and_a_little_after():
 
 
 def test_gate_copy_counts_down_to_the_barrier():
-    assert gate_label(12, 7) == "closes in 7 min"
-    assert gate_label(5.6, 0.6) == "closing now"
-    assert gate_label(4, -1) == "closed, train in 4 min"
-    assert gate_label(0.5, -4.5) == "closed, train passing"
-    assert gate_label(95, 90) == "closes in 1 hr 30 min"
-    assert gate_label(8) == "closes in 8 min"
+    assert gate_label(12, 7) == "closes in 7 min (estimate)"
+    assert gate_label(5.6, 0.6) == "estimated to be closing now"
+    assert gate_label(4, -1) == "estimated closed, train in 4 min"
+    assert gate_label(0.5, -4.5) == "estimated closed, train passing"
+    assert gate_label(95, 90) == "closes in 1 hr 30 min (estimate)"
+    assert gate_label(8) == "closes in 8 min (estimate)"
     assert passed_label(0.4) == "passed just now"
     assert passed_label(2.6) == "passed 3 min ago"
 
@@ -131,6 +131,6 @@ def test_a_just_passed_train_is_named_once():
             "sightings": [{"number": "16601", "name": "Coastal Express", "current": "ELM", "age": 1, "passed_local": False}],
         }
     )
-    assert "Just passed" in text
+    assert "Estimated recent passage" in text
     assert "16601 Coastal Express passed 1 min ago at School Road" in text
     assert "On this line" not in text

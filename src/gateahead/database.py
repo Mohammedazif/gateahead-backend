@@ -10,7 +10,7 @@ from pathlib import Path
 
 from gateahead.config import load_settings
 from gateahead.models import RouteStop
-from gateahead.store import Store
+from gateahead.store import Store, decode_route_variants
 
 
 def consolidate(target: Path, source: Path) -> dict:
@@ -49,13 +49,14 @@ def consolidate(target: Path, source: Path) -> dict:
                 if len(stops) < 2:
                     continue
                 store.save_route(route["train_number"], stops, route["run_days"] if "run_days" in route.keys() else "",
-                                 fetched_at=route["fetched_at"])
+                                 fetched_at=route["fetched_at"],
+                                 variants=decode_route_variants(route["variants"]) if "variants" in route.keys() else ())
                 count += 1
         imported["train_routes"] = count
         # Timestamped records use their newest version; untimestamped conflicts keep the destination.
         for table, stamp in {"users": "updated_at", "crossings": None, "alerts": "sent_at", "halts": None,
                              "train_names": None, "train_catalog": None, "station_scans": "checked_at",
-                             "gate_reports": "created_at"}.items():
+                             "gate_reports": "created_at", "crossing_aliases": None}.items():
             if table not in tables:
                 continue
             definition = snapshot.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()[0]
@@ -75,6 +76,7 @@ def consolidate(target: Path, source: Path) -> dict:
                 store._conn.executemany(f'INSERT INTO "{table}" ({names}) VALUES ({",".join("?" for _ in columns)}) ON CONFLICT {suffix}',
                                         [tuple(row[c] for c in columns) for row in snapshot.execute(f'SELECT * FROM "{table}"')])
             imported[table] = store._conn.total_changes - before
+        store.migrate_crossing_ids()
         store.meta_set("database_consolidated_from", str(source))
         return {"database": str(target), "backups": str(backups), "imported": imported}
     finally:

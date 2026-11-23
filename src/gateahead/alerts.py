@@ -14,7 +14,7 @@ async def poll_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
     service: GateAhead = context.application.bot_data["service"]
     users = service.store.subscribed_users()
     for user in users:
-        if user.lat is None:
+        if user.lat is None or user.lon is None:
             continue
         try:
             scan = await service.predict_here(user.lat, user.lon)
@@ -27,22 +27,25 @@ async def poll_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
                 continue
             grouped.setdefault(row.get("run_id") or row["train"], []).append(row)
         for run_id, rows in grouped.items():
+            current = service.store.get_user(user.user_id)
+            if not current.subscribed or (current.lat, current.lon) != (user.lat, user.lon):
+                break
             rows = sorted(rows, key=lambda r: r["eta"])
             number = rows[0]["train"]
             if not service.store.should_alert(
                 user.user_id, "near", run_id, service.settings.alert_cooldown_min
             ):
                 continue
-            head = f"Train {number} {rows[0]['name']}"
+            head = f"Train {number} {rows[0]['name'][:200]}"
             if rows[0].get("start_date"):
                 head += f" (started {rows[0]['start_date']})"
-            lines = [head, "Closing near you:"]
+            lines = [head, "Estimated crossing closures nearby. The actual barrier state is unknown."]
             for row in rows[:6]:
                 eta = gate_label(row["eta"], row.get("closes_in"))
                 label = row["cluster"]
                 if row.get("lat") is not None:
                     label = f"{row['cluster']} ({row['lat']:.4f}, {row['lon']:.4f})"
-                lines.append(f"• {label}: {eta}")
+                lines.append(f"• {label[:200]}: {eta}")
             lines.append("/nearby for the map.")
             try:
                 await context.bot.send_message(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
@@ -37,7 +38,7 @@ _LIVE_PAST_MIN = 360.0
 _LIVE_AHEAD_MIN = 150.0
 _CLOSE_TRUST_MIN = 30.0
 _DISAGREE_MIN = 20.0
-_UNCONFIRMED_ROUTE_SLACK_MIN = 4.0
+UNCERTAIN_ROUTE_SLACK_MIN = 4.0
 BEND_HALF_KM = 15.0
 _WEEK = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 
@@ -69,27 +70,50 @@ def parse_timetable_html(html: str) -> list[RouteStop]:
 
 
 def parse_schedule(html: str) -> tuple[list[RouteStop], str]:
+    route = _parse_routes(html)
+    return route.stops, route.run_days
+
+
+def _parse_routes(html: str) -> SavedRoute:
     match = _NEXT.search(html)
     if not match:
-        return [], ""
+        return SavedRoute([])
     try:
         payload = json.loads(match.group(1))
     except json.JSONDecodeError:
-        return [], ""
+        return SavedRoute([])
     for key in ("props", "pageProps", "trainTimeTable"):
         payload = payload.get(key) if isinstance(payload, dict) else None
-    table = payload
-    if not isinstance(table, dict):
-        return [], ""
-    rows, run_days = _schedule(table)
-    return parse_route_rows(rows), run_days
+    if not isinstance(payload, dict):
+        return SavedRoute([])
+    variants = _schedule(payload)
+    if not variants:
+        return SavedRoute([])
+    return replace(variants[0], variants=tuple(variants[1:]))
 
 
-def runs_on(run_days: str, when: datetime) -> bool:
+def runs_on(run_days: str, when: date) -> bool:
     days = {part.strip().upper()[:3] for part in run_days.split(",") if part.strip()}
     if not days:
         return True
     return _WEEK[when.weekday()] in days
+
+
+def route_for_start(route: SavedRoute | None, start: date | str | None) -> SavedRoute | None:
+    if route is None or not route.variants:
+        return route
+    if not start:
+        return None
+    if isinstance(start, str):
+        try:
+            start = date.fromisoformat(start)
+        except ValueError:
+            return None
+    candidates = (route, *route.variants)
+    matching = [candidate for candidate in candidates if candidate.run_days and runs_on(candidate.run_days, start)]
+    if not matching:
+        matching = [candidate for candidate in candidates if not candidate.run_days]
+    return matching[0] if len(matching) == 1 else None
 
 
 def classify_passage(
@@ -125,6 +149,9 @@ def passage_delta(stops: list[RouteStop], run_days: str, lat: float, lon: float,
 def scheduled_position(
     number: str, route: SavedRoute, lat: float, lon: float, now: datetime, start: date | None = None
 ) -> TrainPosition | None:
+    route = route_for_start(route, start)
+    if route is None:
+        return None
     stops = route.stops
     if len(stops) < 2:
         return None
@@ -159,6 +186,7 @@ def scheduled_position(
         origin_name=stops[0].name,
         dest_name=stops[-1].name,
         start_date=start.isoformat() if start else "",
+        observed=False,
     )
 
 
@@ -217,6 +245,9 @@ def _coords_at(origin: RouteStop, dest: RouteStop | None, covered: float) -> tup
 
 
 def waiting_position(number: str, route: SavedRoute, now: datetime, start: date | None = None) -> TrainPosition | None:
+    route = route_for_start(route, start)
+    if route is None:
+        return None
     stops = route.stops
     if len(stops) < 2:
         return None
@@ -243,6 +274,7 @@ def waiting_position(number: str, route: SavedRoute, now: datetime, start: date 
         origin_name=origin.name,
         scheduled_at=f"{clock // 60:02d}:{clock % 60:02d}",
         start_date=start.isoformat() if start else "",
+        observed=False,
     )
 
 
@@ -295,6 +327,23 @@ def locate_stops(stops: list[RouteStop], coords: dict[str, tuple[float, float]])
     return located
 
 
+def locate_route(
+    route: SavedRoute | tuple[list[RouteStop], str], coords_for: Callable[[list[str]], dict[str, tuple[float, float]]],
+) -> SavedRoute:
+    if not isinstance(route, SavedRoute):
+        route = SavedRoute(*route)
+    missing = list(dict.fromkeys(
+        stop.code for variant in (route, *route.variants) for stop in variant.stops
+        if stop.lat is None or stop.lon is None
+    ))
+    if not missing:
+        return route
+    coords = coords_for(missing)
+    return replace(route, stops=locate_stops(route.stops, coords), variants=tuple(
+        replace(variant, stops=locate_stops(variant.stops, coords)) for variant in route.variants
+    ))
+
+
 def timetable_call(
     stops: list[RouteStop],
     position: TrainPosition,
@@ -327,7 +376,8 @@ def timetable_call(
         return TimetableCall(None, None, 0, True, awaiting_update=True, inferred_route=inferred_route)
     eta = _eta_from_clock(position, train_clock, gate_clock, leave_clock)
     if eta < -PASS_GRACE_MIN:
-        return TimetableCall(None, None, 0, True, -eta, inferred_route=inferred_route)
+        # Elapsed time alone cannot confirm that the reported train reached the gate.
+        return TimetableCall(None, None, 0, True, awaiting_update=position.observed, inferred_route=inferred_route)
     span = _span(stops, gate_km)
     bracket = None
     if span and (span[1].km - span[0].km >= 15 or eta > 30):
@@ -336,7 +386,7 @@ def timetable_call(
     if inferred_route:
         # Geometry compatible with a route cannot establish its occupied line.
         # Keep the estimate available without asserting closure or animation.
-        slack = max(slack, _UNCONFIRMED_ROUTE_SLACK_MIN)
+        slack = max(slack, UNCERTAIN_ROUTE_SLACK_MIN)
     return TimetableCall(eta, bracket, slack, True, inferred_route=inferred_route)
 
 
@@ -374,7 +424,7 @@ def list_status(eta: float | None, slack: float, settings: Settings, sourced: bo
     status = classify(eta, settings)
     if status == "passed":
         return None
-    if sourced and slack > 3 and status in {"closed", "closing_soon"}:
+    if slack > 3 and status in {"closed", "closing_soon"}:
         status = "approaching"
     if not sourced and status == "open":
         return None
@@ -620,30 +670,21 @@ def _span(stops: list[RouteStop], km: float) -> tuple[RouteStop, RouteStop] | No
     return None
 
 
-def _schedule(table: dict) -> tuple[list, str]:
-    best: list = []
-    days = ""
-    details = table.get("trainScheduleDetail") or []
-    if isinstance(details, list):
-        for detail in details:
-            if not isinstance(detail, dict):
+def _schedule(table: dict) -> list[SavedRoute]:
+    variants: dict[tuple[RouteStop, ...], str] = {}
+    for collection, field in (("trainScheduleDetail", "route"), ("timeTableDaysGroup", "items")):
+        rows = table.get(collection)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
                 continue
-            route = detail.get("route")
-            if isinstance(route, list) and len(route) > len(best):
-                best = route
-                days = _run_days(detail.get("run_days"))
-    groups = table.get("timeTableDaysGroup") or []
-    if isinstance(groups, list):
-        for group in groups:
-            if not isinstance(group, dict):
+            stops = tuple(parse_route_rows(row.get(field)))
+            if len(stops) < 2:
                 continue
-            items = group.get("items")
-            if isinstance(items, list) and len(items) > len(best):
-                best = items
-                found = _run_days(group.get("run_days"))
-                if found:
-                    days = found
-    return best, days
+            days = _run_days(row.get("run_days"))
+            variants[stops] = _run_days(f"{variants.get(stops, '')},{days}")
+    return [SavedRoute(list(stops), days) for stops, days in sorted(variants.items(), key=lambda item: -len(item[0]))]
 
 
 def _run_days(value: object) -> str:
@@ -698,7 +739,7 @@ def _int(value: object) -> int:
         return 0
 
 
-async def fetch_timetable(session: aiohttp.ClientSession, train_number: str) -> tuple[list[RouteStop], str]:
+async def fetch_timetable(session: aiohttp.ClientSession, train_number: str) -> SavedRoute:
     timeout = aiohttp.ClientTimeout(total=15)
     try:
         async with session.get(
@@ -707,8 +748,8 @@ async def fetch_timetable(session: aiohttp.ClientSession, train_number: str) -> 
             timeout=timeout,
         ) as response:
             if response.status != 200:
-                return [], ""
+                return SavedRoute([])
             html = await response.text()
     except (aiohttp.ClientError, TimeoutError):
-        return [], ""
-    return parse_schedule(html)
+        return SavedRoute([])
+    return _parse_routes(html)

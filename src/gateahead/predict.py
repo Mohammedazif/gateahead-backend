@@ -5,7 +5,8 @@ from gateahead.geo import along_route, km
 from gateahead.models import Crossing, TrainPosition
 
 _ON_RAIL_KM = 0.2
-_TRAIN_ON_RAIL_KM = 8.0
+_TRAIN_ON_RAIL_KM = 0.2
+_STATION_ON_RAIL_KM = 8.0
 _END_SLACK_KM = 0.4
 _MOVED_KM = 0.4
 _BRACKET_KM = 15.0
@@ -163,7 +164,7 @@ def _station_km(
     point = stations.get(code.upper())
     if point is None:
         return None
-    return _along(route, point, _TRAIN_ON_RAIL_KM)
+    return _along(route, point, _STATION_ON_RAIL_KM)
 
 
 def _forward(train_km: float, last_km: float | None, next_km: float | None) -> float | None:

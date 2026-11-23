@@ -76,6 +76,7 @@ class RouteStop:
 class SavedRoute:
     stops: list[RouteStop]
     run_days: str = ""
+    variants: tuple[SavedRoute, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,8 @@ class TrainPosition:
     run: str = ""
     covered_km: float | None = None
     start_date: str = ""
+    report_age_known: bool = True
+    observed: bool = True
 
     @property
     def run_id(self) -> str:

@@ -6,12 +6,15 @@ import re
 import time
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from html import unescape
+from urllib.parse import parse_qs, urlsplit
 
 import aiohttp
 
 from gateahead.geo import interpolate, km
 from gateahead.clock import INDIA
 from gateahead.models import Direction, TrainPosition
+from gateahead.predict import REPORT_FRESH_MIN
 from gateahead.snapshots import SnapshotCache
 
 _NEXT_DATA = re.compile(
@@ -47,17 +50,15 @@ async def fetch_lts(session: aiohttp.ClientSession, train_number: str) -> dict |
 
 def cached_live(train_number: str, cache: SnapshotCache | None = None, start: date | None = None) -> LiveLook | None:
     if start is not None:
-        key = f"live:v2:{train_number}:{start.isoformat()}"
+        key = f"live:v3:{train_number}:{start.isoformat()}"
         raw = cache.peek(key) if cache else None
         if raw is None and cache:
             legacy = cache.peek(f"live:{train_number}")
-            if legacy and report_start(legacy.get("moving") or {}) == start.isoformat():
+            if legacy and _report_matches(legacy.get("moving"), train_number, start):
                 raw = {**legacy, "start_date": start.isoformat()}
-        return LiveLook(**{**raw, "operating_status": raw.get("operating_status", operating_status(raw.get("moving")))}) if raw else None
+        return _cached_look(raw, train_number, start)
     if cache is not None:
-        raw = cache.peek(f"live:{train_number}")
-        return LiveLook(raw["moving"], raw["notice"], raw["finished"], raw.get("fetched_at"), raw.get("start_date", ""),
-                        raw.get("operating_status", operating_status(raw.get("moving")))) if raw else None
+        return _cached_look(cache.peek(f"live:{train_number}"), train_number)
     hit = _lts_cache.get(train_number)
     return hit[1] if hit and time.monotonic() - hit[0] < _LTS_TTL else None
 
@@ -73,8 +74,8 @@ async def fetch_live(
             look = await fetch_run(session, train_number, start)
             return {"moving": look.moving, "notice": look.notice, "finished": look.finished,
                     "fetched_at": time.time(), "start_date": start.isoformat(), "operating_status": look.operating_status}
-        raw = await cache.get(f"live:v2:{train_number}:{start.isoformat()}", _LTS_TTL, load_run) if cache else await load_run()
-        return LiveLook(**raw)
+        raw = await cache.get(f"live:v3:{train_number}:{start.isoformat()}", _LTS_TTL, load_run) if cache else await load_run()
+        return _cached_look(raw, train_number, start) or _unavailable_run(start)
     now = time.monotonic()
     hit = _lts_cache.get(train_number)
     if cache is None and hit and now - hit[0] < _LTS_TTL:
@@ -86,8 +87,7 @@ async def fetch_live(
                     "start_date": look.start_date, "operating_status": look.operating_status}
 
         raw = await cache.get(f"live:{train_number}", _LTS_TTL, load)
-        look = LiveLook(raw["moving"], raw["notice"], raw["finished"], raw.get("fetched_at"), raw.get("start_date", ""),
-                        raw.get("operating_status", operating_status(raw.get("moving"))))
+        look = _cached_look(raw, train_number) or LiveLook(None, "", False, operating_status="unknown")
     else:
         look = replace(await _fetch_live_data(session, train_number), fetched_at=time.time())
     if cache is None:
@@ -95,8 +95,40 @@ async def fetch_live(
     return look
 
 
+def _cached_look(raw: dict | None, number: str, start: date | None = None) -> LiveLook | None:
+    if not raw:
+        return None
+    moving = raw.get("moving")
+    if moving is not None and not _report_matches(moving, number, start):
+        return None
+    return LiveLook(moving, raw["notice"], raw["finished"], raw.get("fetched_at"), raw.get("start_date", ""),
+                    raw.get("operating_status", operating_status(moving)))
+
+
+def _report_matches(report: object, number: str | None, start: date | None = None) -> bool:
+    if not isinstance(report, dict):
+        return False
+    dates = {_parse_start(report[key]) for key in ("train_start_date", "start_date") if report.get(key)}
+    if len(dates) > 1 or (start is not None and dates != {start.isoformat()}):
+        return False
+    if number is None:
+        return True
+    for key in ("train_number", "train_no", "trainNumber"):
+        supplied = report.get(key)
+        if supplied is None or supplied == "":
+            continue
+        identifier = str(supplied).strip()
+        if not identifier.isascii() or not identifier.isdecimal() or identifier.zfill(5) != str(number).zfill(5):
+            return False
+    return True
+
+
 def report_start(lts: dict) -> str:
-    value = str(lts.get("train_start_date") or lts.get("start_date") or "").strip()
+    return _parse_start(lts.get("train_start_date") or lts.get("start_date") or "")
+
+
+def _parse_start(raw: object) -> str:
+    value = str(raw).strip()
     for pattern in ("%Y-%m-%d", "%d-%m-%Y", "%d %b %Y"):
         try:
             return datetime.strptime(value[:10] if pattern != "%d %b %Y" else value, pattern).date().isoformat()
@@ -125,11 +157,10 @@ async def fetch_run(session: aiohttp.ClientSession, number: str, start: date) ->
     if offset < 0:
         return LiveLook(None, "Not started", False, start_date=start.isoformat())
     payload = await _fetch_lts_api(session, number, offset)
-    if payload is None:
+    if not _report_matches(payload, number, start):
         payload = await _fetch_lts_page(session, number, start)
-    # Never relabel today's response as an older journey when an upstream ignores the requested date.
-    if payload is None or report_start(payload) != start.isoformat():
-        return LiveLook(None, "Journey-date report unavailable", False, start_date=start.isoformat(), operating_status="unknown")
+    if not _report_matches(payload, number, start):
+        return _unavailable_run(start)
     status = operating_status(payload)
     if status != "running":
         return LiveLook(payload, str(payload.get("new_message") or payload.get("message") or status.replace("_", " ")),
@@ -138,15 +169,23 @@ async def fetch_run(session: aiohttp.ClientSession, number: str, start: date) ->
     return replace(result, start_date=start.isoformat())
 
 
+def _unavailable_run(start: date) -> LiveLook:
+    return LiveLook(None, "Journey report unavailable", False, start_date=start.isoformat(), operating_status="unknown")
+
+
 async def _fetch_live_data(session: aiohttp.ClientSession, train_number: str) -> LiveLook:
     today = await _fetch_lts_api(session, train_number, 0)
+    if not _report_matches(today, train_number):
+        today = None
     yesterday = None
     if not _on_the_move(today):
         yesterday = await _fetch_lts_api(session, train_number, 1)
+        if not _report_matches(yesterday, train_number):
+            yesterday = None
     look = classify_live(today, yesterday)
     if look.moving is None and today is None and yesterday is None:
         page = await _fetch_lts_page(session, train_number, None)
-        if page is not None:
+        if _report_matches(page, train_number):
             look = classify_live(page, None)
     return look
 
@@ -174,12 +213,12 @@ def classify_live(today: dict | None, yesterday: dict | None) -> LiveLook:
                         start_date=report_start(today), operating_status=state)
     moving = _choose_lts(today, yesterday)
     if moving is not None:
-        return LiveLook(moving, "", False)
+        return LiveLook(moving, "", False, start_date=report_start(moving))
     if isinstance(today, dict) and today.get("success") and today.get("at_dstn"):
-        return LiveLook(None, "", True)
+        return LiveLook(None, "", True, start_date=report_start(today))
     notice = _notice_text(today)
     if notice or _bare_origin(today):
-        return LiveLook(None, notice or "not started", False)
+        return LiveLook(None, notice or "not started", False, start_date=report_start(today or {}))
     return LiveLook(None, "", False)
 
 
@@ -199,10 +238,9 @@ def _bare_origin(lts: dict | None) -> bool:
     return not (lts.get("current_station_code") or lts.get("current_station_name"))
 
 
-def _keep_notice(raw: object, start: date | None = None) -> dict | None:
+def _keep_notice(raw: object, start: date | None = None, number: str | None = None) -> dict | None:
     if isinstance(raw, list):
-        if start is not None:
-            raw = [row for row in raw if isinstance(row, dict) and report_start(row) == start.isoformat()]
+        raw = [row for row in raw if _report_matches(row, number, start)]
         for row in raw:
             if isinstance(row, dict) and operating_status(row) in {"cancelled", "diverted", "partially_cancelled"}:
                 return row
@@ -213,7 +251,7 @@ def _keep_notice(raw: object, start: date | None = None) -> dict | None:
             if isinstance(row, dict) and _notice_text(row):
                 return row
         return None
-    if isinstance(raw, dict) and (raw.get("success") or _notice_text(raw) or operating_status(raw) in {"cancelled", "diverted", "partially_cancelled"}):
+    if _report_matches(raw, number) and (raw.get("success") or _notice_text(raw) or operating_status(raw) in {"cancelled", "diverted", "partially_cancelled"}):
         return raw
     return None
 
@@ -241,7 +279,7 @@ async def _fetch_lts_api(session: aiohttp.ClientSession, train_number: str, day:
         return None
     if isinstance(payload, dict) and isinstance(payload.get("data"), (dict, list)):
         payload = payload["data"]
-    return _keep_notice(payload, datetime.now(INDIA).date() - timedelta(days=day))
+    return _keep_notice(payload, datetime.now(INDIA).date() - timedelta(days=day), train_number)
 
 
 def _usable(lts: dict | None) -> bool:
@@ -278,14 +316,17 @@ async def _fetch_lts_page(
             raw = payload
         except json.JSONDecodeError:
             raw = None
-    lts = _keep_notice(raw, start)
-    if _usable(lts) or (lts and operating_status(lts) in {"cancelled", "diverted", "partially_cancelled"}):
+    lts = _keep_notice(raw, start, train_number)
+    if _report_matches(lts, train_number, start) and (
+        _usable(lts) or operating_status(lts) in {"cancelled", "diverted", "partially_cancelled"}
+    ):
         return lts
-    return _lts_from_html(html, train_number)
+    return _lts_from_html(html, train_number, start)
 
 
 _CLOCK = re.compile(r"^\d{1,2}:\d{2}$")
 _NEXT_IN = re.compile(r"(\d+)\s*min", re.I)
+_AGE_TEXT = re.compile(r"(?:as of\s+)?(\d+(?:\.\d+)?)\s*(?:min|mins|minute|minutes)\s+ago", re.I)
 
 
 def clean_place(value: object) -> str:
@@ -337,21 +378,32 @@ def _left_km(lts: dict) -> int | None:
     return left
 
 
-_FEEDBACK_STATION = re.compile(
-    r"live-train-status-user-feedback[^\"']*current_station=([A-Z]{2,6})",
+_FEEDBACK_LINK = re.compile(
+    r"live-train-status-user-feedback\?[^\"'<>\r\n]+",
     re.I,
 )
 _CURRENT_STATION = re.compile(r"current_station=([A-Z]{2,6})", re.I)
 
 
-def _lts_from_html(html: str, train_number: str) -> dict | None:
-    match = _FEEDBACK_STATION.search(html) or _CURRENT_STATION.search(html)
-    if not match:
-        return None
-    code = match.group(1).upper()
+def _lts_from_html(html: str, train_number: str, start: date | None = None) -> dict | None:
+    feedback_links = list(_FEEDBACK_LINK.finditer(html))
+    for feedback in feedback_links:
+        query = parse_qs(urlsplit(unescape(feedback.group())).query)
+        code = (query.get("current_station") or [""])[0].upper()
+        identity = {key: query[key][0] for key in ("train_no", "train_number", "start_date") if key in query}
+        if re.fullmatch(r"[A-Z0-9]{1,6}", code) and _report_matches(identity, train_number, start):
+            break
+    else:
+        if feedback_links or start is not None:
+            return None
+        match = _CURRENT_STATION.search(html)
+        if not match:
+            return None
+        code = match.group(1).upper()
+        identity = {}
     return {
         "success": True,
-        "train_number": str(train_number),
+        **identity,
         "current_station_code": code,
         "current_station_name": code,
         "at_src": False,
@@ -376,7 +428,11 @@ def _normalize_lts(raw: object) -> dict | None:
     return None
 
 
-def position_from_lts(train_number: str, lts: dict, now: datetime | None = None) -> TrainPosition | None:
+def position_from_lts(
+    train_number: str, lts: dict, now: datetime | None = None, *, fetched_at: float | None = None,
+) -> TrainPosition | None:
+    if not _report_matches(lts, train_number):
+        return None
     now = now or datetime.now(INDIA)
     current_code = str(lts.get("current_station_code") or "").upper() or None
     if not current_code and lts.get("at_src"):
@@ -411,7 +467,9 @@ def position_from_lts(train_number: str, lts: dict, now: datetime | None = None)
         delay_minutes = int(delay) if delay is not None and str(delay).strip() != "" else 0
     except (TypeError, ValueError, OverflowError):
         delay_minutes = 0
-    _reported, age = _report_age(lts, now)
+    fetched = min(datetime.fromtimestamp(fetched_at, now.tzinfo), now) if fetched_at is not None else now
+    report_at = _report_time(lts, fetched)
+    age = (now - report_at).total_seconds() / 60 if report_at is not None else REPORT_FRESH_MIN
     info = lts.get("next_stoppage_info") if isinstance(lts.get("next_stoppage_info"), dict) else {}
     platform_no = lts.get("platform_number")
     try:
@@ -440,7 +498,7 @@ def position_from_lts(train_number: str, lts: dict, now: datetime | None = None)
         upcoming_codes=upcoming,
         current_name=clean_place(lts.get("current_station_name") or current_code or ""),
         age_minutes=age,
-        station_etas=_station_etas(upcoming_rows, now),
+        station_etas=_station_etas(upcoming_rows, report_at or fetched),
         name=str(lts.get("train_name") or ""),
         origin_name=clean_place(lts.get("source_stn_name")),
         dest_name=clean_place(lts.get("dest_stn_name")),
@@ -453,6 +511,7 @@ def position_from_lts(train_number: str, lts: dict, now: datetime | None = None)
         run=run,
         covered_km=_covered_km(lts),
         start_date=report_start(lts),
+        report_age_known=report_at is not None,
     )
 
 
@@ -499,19 +558,26 @@ def _float(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _report_age(lts: dict, now: datetime) -> tuple[datetime, float]:
+def _report_time(lts: dict, fetched: datetime) -> datetime | None:
     raw_age = lts.get("status_as_of_min")
-    if raw_age is None or raw_age == "":
-        return now, 0.0
-    age = _float(raw_age)
-    # An invalid supplied age cannot establish that the report is fresh.
-    if age is None:
-        age = 8.0
-    age = max(0.0, age)
+    shown = str(lts.get("status_as_of") or "").strip()
+    relative = _AGE_TEXT.fullmatch(shown) if raw_age is None or raw_age == "" else None
+    age = _float(relative.group(1) if relative else raw_age) if not isinstance(raw_age, bool) else None
+    if age is not None and age >= 0:
+        try:
+            return fetched - timedelta(minutes=age)
+        except OverflowError:
+            return None
     try:
-        return now - timedelta(minutes=age), age
-    except OverflowError:
-        return now - timedelta(minutes=8), 8.0
+        stamp = datetime.fromisoformat(shown)
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        return None
+    stamp = stamp.astimezone(fetched.tzinfo or INDIA)
+    if fetched.tzinfo is None:
+        stamp = stamp.replace(tzinfo=None)
+    return stamp if stamp <= fetched else None
 
 
 def _station_etas(rows: list, now: datetime) -> tuple[tuple[str, datetime], ...]:
@@ -523,15 +589,21 @@ def _station_etas(rows: list, now: datetime) -> tuple[tuple[str, datetime], ...]
         code = str(row.get("station_code") or "").upper()
         if not code:
             continue
-        stamp = None
-        a_min = row.get("a_min")
-        if a_min is not None and str(a_min).strip() != "":
-            try:
-                stamp = midnight + timedelta(minutes=int(a_min))
-            except (TypeError, ValueError, OverflowError):
-                stamp = None
-        if stamp is not None:
-            out.append((code, stamp))
+        raw_minute = row.get("a_min")
+        raw_day = row.get("a_day")
+        if isinstance(raw_minute, bool) or isinstance(raw_day, bool):
+            continue
+        minute = _float(raw_minute)
+        day = _float(raw_day)
+        if minute is None or minute < 0 or (raw_day not in (None, "") and (day is None or not day.is_integer())):
+            continue
+        try:
+            stamp = midnight + timedelta(minutes=minute, days=day if day is not None and minute < 1440 else 0)
+            if day is None and minute < 1440 and now - stamp > timedelta(hours=12):
+                stamp += timedelta(days=1)
+        except OverflowError:
+            continue
+        out.append((code, stamp))
     return tuple(out)
 
 

@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import math
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
@@ -28,6 +28,7 @@ from gatesim.world import BY_CODE, GATE_BY_NODE, STATIONS, Feed, SimGate, SimTra
 DAY = datetime(2026, 11, 16, tzinfo=INDIA)  # a Monday on the railway's clock
 # Minutes before the train that the barrier comes down.
 LEAD_MIN = 5.0
+CLEARANCE_MIN = 2.0
 
 
 def settings(data_dir: Path) -> Settings:
@@ -52,7 +53,7 @@ def truth_status(eta: float | None) -> str:
     """What the gate is really doing for one train, from the true arrival minute."""
     if eta is None:
         return "-"
-    if eta < -1:
+    if eta < -CLEARANCE_MIN:
         return "passed"
     if eta <= LEAD_MIN:
         return "closed"
@@ -76,6 +77,7 @@ class Look:
     others: list[tuple[str, float, str]] = field(default_factory=list)
     sighting: dict | None = None
     train: str = ""
+    run_id: str = ""
     near_gate: bool = False
     # True when this check also opened the tapped-gate view for the train.
     viewed: bool = False
@@ -85,6 +87,9 @@ class Look:
     scene_passed: float | None = None
     # Independently derived from the simulated provider, not the app's labels.
     stopped_report_ahead: bool = False
+    report_ahead: bool = False
+    report_near_crossing: bool = False
+    has_live_report: bool = True
     report_age: float = 0.0
     # The same check seen from every other train on the line: number -> Look for that train.
     rest: list["Look"] = field(default_factory=list)
@@ -120,23 +125,37 @@ class _FakeOsm:
 def simulated(trains: list[SimTrain], feeds: dict[str, Feed], *, cache_live: bool = False):
     """Swap the network calls in gateahead.service for the simulated corridor."""
     clock = _Clock()
-    by_number = {train.number: train for train in trains}
+    by_number: dict[str, list[SimTrain]] = {}
+    by_run = {}
+    for train in sorted(trains, key=lambda item: -item.start_offset_days):
+        by_number.setdefault(train.number, []).append(train)
+        by_run[(train.number, train.origin_date(DAY.date()))] = train
+
+    def observation(train: SimTrain) -> LiveLook:
+        key = train.run_id(DAY.date())
+        payload = live_payload(train, clock.minute, _feed_for(feeds, train), DAY)
+        clock.reports[key] = (clock.minute, payload)
+        return replace(classify_live(payload, None), start_date=train.origin_date(DAY.date()).isoformat())
 
     async def fake_live(_session, number: str, _cache=None, start=None) -> LiveLook:
-        if start is not None and start != DAY.date():
-            return LiveLook(None, "", True, start_date=start.isoformat())
-        train = by_number.get(number)
-        if train is None:
-            return LiveLook(None, "", False)
-        today = live_payload(train, clock.minute, feeds.get(number, Feed()), DAY)
-        today["train_start_date"] = DAY.date().isoformat()
-        clock.reports[number] = (clock.minute, today)
-        return classify_live(today, None)
+        if start is not None:
+            train = by_run.get((number, start))
+            return observation(train) if train else LiveLook(None, "", True, start_date=start.isoformat())
+        choices = by_number.get(number, [])
+        first = LiveLook(None, "", False)
+        for index, train in enumerate(choices):
+            look = observation(train)
+            if look.moving is not None:
+                return look
+            if index == 0:
+                first = look
+        return first
 
     async def fake_timetable(_session, number: str):
-        train = by_number.get(number)
-        if train is None:
+        choices = by_number.get(number, [])
+        if not choices:
             return [], ""
+        train = choices[0]
         return train.timetable_rows(), train.run_days
 
     async def fake_rows(_session, origin: str, dest: str):
@@ -164,9 +183,10 @@ def simulated(trains: list[SimTrain], feeds: dict[str, Feed], *, cache_live: boo
             return await fake_live(session, number)
 
         async def fake_run(session, number, start):
-            if start != DAY.date():
-                return LiveLook(None, "", True, start_date=start.isoformat())
-            return await live._fetch_live_data(session, number)
+            choices = by_number.get(number, [])
+            if len(choices) == 1 and start == choices[0].origin_date(DAY.date()):
+                return await live._fetch_live_data(session, number)
+            return await fake_live(session, number, start=start)
 
         simulated_time = SimpleNamespace(
             time=lambda: (DAY + timedelta(minutes=clock.minute)).timestamp(),
@@ -227,7 +247,11 @@ def run(
     cache_live: bool = False,
 ) -> list[Look]:
     gate = GATE_BY_NODE[gate_node]
-    watched = next(train for train in trains if train.number == watch)
+    matching = [train for train in trains if watch in (train.number, train.run_id(DAY.date()))]
+    if len(matching) != 1:
+        raise ValueError("Select a single journey by its train number and origin date")
+    watched = matching[0]
+    watch_id = watched.run_id(DAY.date())
     looks: list[Look] = []
 
     async def go() -> None:
@@ -236,51 +260,52 @@ def run(
                 clock.minute = minute
                 lat, lon = where(minute)
                 body = await app.predict_here(lat, lon)
-                rows = [row for row in body.get("approaching", []) if gate.id in row.get("ids", [])]
-                mine = next((row for row in rows if row["train"] == watch), None)
-                waiting = {row["number"] for row in body.get("awaiting_update", []) if gate.id in row.get("ids", [])}
-                others = [(row["train"], row["eta"], row["status"]) for row in rows if row["train"] != watch]
-                gone = {row["train"]: row["ago"] for row in body.get("passed", []) if gate.id in row.get("ids", [])}
+                rows = [row for row in body.get("gate_predictions", []) if row["id"] == gate.id]
+                mine = next((row for row in rows if row["run_id"] == watch_id), None)
+                waiting = {row["run_id"] for row in body.get("awaiting_update", []) if gate.id in row.get("ids", [])}
+                others = [(row["run_id"], row["eta"], row["status"]) for row in rows if row["run_id"] != watch_id]
+                gone = {row["run_id"]: row["ago"] for row in body.get("passed", []) if gate.id in row.get("ids", [])}
                 scene_eta = scene_status = scene_passed = None
                 scene_trains = {}
                 scene_waiting = set()
                 scene_gone = {}
                 if with_scene:
                     scene = await app.scene_here(lat, lon, gate.id)
-                    scene_trains = {row["number"]: row for row in scene.get("trains", [])}
-                    scene_waiting = {row["number"] for row in scene.get("awaiting_update", [])}
-                    scene_gone = {row["number"]: row["ago_min"] for row in scene.get("passed", [])}
-                    hit = scene_trains.get(watch)
+                    scene_trains = {row["run_id"]: row for row in scene.get("trains", [])}
+                    scene_waiting = {row["run_id"] for row in scene.get("awaiting_update", [])}
+                    scene_gone = {row["run_id"]: row["ago_min"] for row in scene.get("passed", [])}
+                    hit = scene_trains.get(watch_id)
                     if hit:
                         scene_eta, scene_status = hit["eta_min"], hit["status"]
                         assert abs(hit["closes_in_min"] - (hit["eta_min"] - LEAD_MIN)) < 0.15
-                    elif watch in scene_waiting:
+                    elif watch_id in scene_waiting:
                         scene_status = "awaiting_update"
-                    scene_passed = scene_gone.get(watch)
+                    scene_passed = scene_gone.get(watch_id)
                 for row in rows:
                     assert abs(row["closes_in"] - (row["eta"] - LEAD_MIN)) < 0.15, row
                 gate_time = watched.gate_time(gate)
                 true_eta = None if gate_time is None else gate_time - minute
-                sighting = next((s for s in body.get("sightings", []) if s["number"] == watch), None)
+                sighting = next((s for s in body.get("sightings", []) if s["run_id"] == watch_id), None)
                 rest = []
                 for other in trains:
-                    if other.number == watch:
+                    other_id = other.run_id(DAY.date())
+                    if other_id == watch_id:
                         continue
-                    row = next((item for item in rows if item["train"] == other.number), None)
-                    scene_row = scene_trains.get(other.number)
+                    row = next((item for item in rows if item["run_id"] == other_id), None)
+                    scene_row = scene_trains.get(other_id)
                     when = other.gate_time(gate)
                     eta = None if when is None else when - minute
                     rest.append(
                         Look(minute, (lat, lon), eta, truth_status(eta), row["eta"] if row else None,
-                             row["status"] if row else "awaiting_update" if other.number in waiting else None,
+                             row["status"] if row else "awaiting_update" if other_id in waiting else None,
                              scene_row["eta_min"] if scene_row else None,
-                             scene_row["status"] if scene_row else "awaiting_update" if other.number in scene_waiting else None,
-                             train=other.number, viewed=with_scene,
+                             scene_row["status"] if scene_row else "awaiting_update" if other_id in scene_waiting else None,
+                             train=other.number, run_id=other_id, viewed=with_scene,
                              near_gate=geo_km((lat, lon), gate.coords) <= 2.0,
-                             app_closes=row["closes_in"] if row else None, app_passed=gone.get(other.number),
-                             scene_passed=scene_gone.get(other.number),
-                             **_report_state(other, feeds.get(other.number, Feed()), minute, gate,
-                                             clock.reports.get(other.number)))
+                             app_closes=row["closes_in"] if row else None, app_passed=gone.get(other_id),
+                             scene_passed=scene_gone.get(other_id),
+                             **_report_state(other, _feed_for(feeds, other), minute, gate,
+                                             clock.reports.get(other_id)))
                     )
                 looks.append(
                     Look(
@@ -289,19 +314,20 @@ def run(
                         true_eta=true_eta,
                         true_status=truth_status(true_eta),
                         app_eta=mine["eta"] if mine else None,
-                        app_status=mine["status"] if mine else "awaiting_update" if watch in waiting else None,
+                        app_status=mine["status"] if mine else "awaiting_update" if watch_id in waiting else None,
                         scene_eta=scene_eta,
                         scene_status=scene_status,
                         others=others,
                         sighting=sighting,
-                        train=watch,
+                        train=watched.number,
+                        run_id=watch_id,
                         rest=rest,
                         near_gate=geo_km((lat, lon), gate.coords) <= 2.0,
                         viewed=with_scene,
                         app_closes=mine["closes_in"] if mine else None,
-                        app_passed=gone.get(watch),
+                        app_passed=gone.get(watch_id),
                         scene_passed=scene_passed,
-                        **_report_state(watched, feeds.get(watch, Feed()), minute, gate, clock.reports.get(watch)),
+                        **_report_state(watched, _feed_for(feeds, watched), minute, gate, clock.reports.get(watch_id)),
                     )
                 )
 
@@ -309,16 +335,29 @@ def run(
     return looks
 
 
+def _feed_for(feeds: dict[str, Feed], train: SimTrain) -> Feed:
+    return feeds.get(train.run_id(DAY.date())) or feeds.get(train.number) or Feed()
+
+
 def _report_state(train: SimTrain, feed: Feed, minute: float, gate: SimGate,
                   fetched: tuple[float, dict] | None = None) -> dict:
     fetched_minute, report = fetched if fetched is not None else (minute, live_payload(train, minute, feed, DAY))
     seen = feed.report_minute(fetched_minute)
     covered, state, _index = train.covered_at(seen)
+    has_live_report = report.get("status") in {"A", "D", "T"} and report.get("cur_stn_lat") is not None
+    reported_km = report.get("distance_from_source", covered) if state == "moving" else covered
+    target = train.km_of_s(gate.s)
+    relevant = train.gate_time(gate) is not None
+    # Moving locations in the provider fixture are reported to the nearest
+    # kilometre. When that bin straddles the crossing, it cannot prove passage.
+    resolution = 0.5 if state == "moving" else 0.01
+    ahead = relevant and target > reported_km + resolution
+    near = relevant and abs(target - reported_km) <= resolution
     return {
-        "stopped_report_ahead": state in {"before", "at"}
-        and report.get("status") == "A"
-        and train.gate_time(gate) is not None
-        and train.km_of_s(gate.s) > covered,
+        "stopped_report_ahead": ahead and state in {"before", "at"} and report.get("status") == "A",
+        "report_ahead": has_live_report and ahead,
+        "report_near_crossing": has_live_report and near,
+        "has_live_report": has_live_report,
         "report_age": report.get("status_as_of_min", 0) + max(0, minute - fetched_minute),
     }
 

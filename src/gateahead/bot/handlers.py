@@ -4,7 +4,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 from telegram.error import TimedOut
 from telegram.ext import ContextTypes
 
-from gateahead.bot.formatters import friendly_error, h, help_text, nearby_text, predict_text, start_text
+from gateahead.bot.formatters import friendly_error, h, help_text, nearby_text, predict_text, reply_pages, start_text
 from gateahead.maps import looks_like_maps, resolve_maps_url
 from gateahead.service import GateAhead
 
@@ -15,6 +15,11 @@ def svc(context: ContextTypes.DEFAULT_TYPE) -> GateAhead:
 
 def _awaiting(context: ContextTypes.DEFAULT_TYPE) -> str:
     return context.user_data.get("awaiting") or ""
+
+
+async def _reply_pages(message, text: str) -> None:
+    for page in reply_pages(text):
+        await message.reply_text(page, parse_mode="HTML", disable_web_page_preview=True)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -38,7 +43,7 @@ async def setlocation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def markgate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data["awaiting"] = "gate"
     if context.args:
-        coords = await resolve_maps_url(svc(context).session, " ".join(context.args))
+        coords = await resolve_maps_url(" ".join(context.args))
         if coords is None:
             await update.message.reply_text(
                 "Could not read that Maps link. Send a Telegram location instead."
@@ -59,7 +64,7 @@ async def location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (update.message.text or "").strip()
     if looks_like_maps(text):
-        coords = await resolve_maps_url(svc(context).session, text)
+        coords = await resolve_maps_url(text)
         if coords is None:
             await update.message.reply_text(
                 "Could not read that Maps link. Send a Telegram location instead."
@@ -69,6 +74,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     if _awaiting(context) == "gate":
         await update.message.reply_text("Please send a map pin or a Google Maps link for the crossing.")
+    elif _awaiting(context) == "here":
+        await update.message.reply_text("Use Share my current location, send a Telegram map pin, or paste a map link.")
 
 
 async def choose_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -79,11 +86,16 @@ async def choose_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         lat, lon = float(lat_s), float(lon_s)
     except (ValueError, TypeError):
         return
+    if kind not in {"here", "gate"}:
+        return
     context.user_data["awaiting"] = kind
     await _handle_coords(update, context, lat, lon)
 
 
 async def _handle_coords(update: Update, context: ContextTypes.DEFAULT_TYPE, lat: float, lon: float) -> None:
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        await update.effective_message.reply_text("That pin is outside the map. Please send another location.")
+        return
     mode = _awaiting(context)
     if not mode:
         keyboard = InlineKeyboardMarkup(
@@ -104,9 +116,7 @@ async def _handle_coords(update: Update, context: ContextTypes.DEFAULT_TYPE, lat
         return
     user = svc(context).set_location(update.effective_user.id, lat, lon)
     items, error = await svc(context).nearby(user.lat, user.lon)
-    await update.effective_message.reply_text(
-        nearby_text(items, error), parse_mode="HTML", disable_web_page_preview=True
-    )
+    await _reply_pages(update.effective_message, nearby_text(items, error))
 
 
 async def _save_gate(update: Update, context: ContextTypes.DEFAULT_TYPE, lat: float, lon: float) -> None:
@@ -118,7 +128,7 @@ async def _save_gate(update: Update, context: ContextTypes.DEFAULT_TYPE, lat: fl
     elif result.verdict == "reject":
         text = friendly_error(result.reason) if re_map_error(result.reason) else result.reason
     else:
-        text = "Added. This pin was not already listed."
+        text = "Crossing submitted for review. It will stay off the public map until it is verified."
     await update.effective_message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
 
 
@@ -133,9 +143,7 @@ async def nearby(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Set your location first with /setlocation.")
         return
     items, error = await svc(context).nearby(user.lat, user.lon)
-    await update.message.reply_text(
-        nearby_text(items, error), parse_mode="HTML", disable_web_page_preview=True
-    )
+    await _reply_pages(update.message, nearby_text(items, error))
 
 
 async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -149,14 +157,15 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except TimedOut:
         status = None
     scan = await svc(context).predict_here(user.lat, user.lon)
-    text = predict_text(scan)
+    pages = reply_pages(predict_text(scan))
     if status is not None:
         try:
-            await status.edit_text(text, parse_mode="HTML", disable_web_page_preview=True)
-            return
+            await status.edit_text(pages[0], parse_mode="HTML", disable_web_page_preview=True)
+            pages = pages[1:]
         except TimedOut:
             pass
-    await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
+    for page in pages:
+        await update.message.reply_text(page, parse_mode="HTML", disable_web_page_preview=True)
 
 
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -166,11 +175,17 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(friendly_error(str(exc)))
         return
     await update.message.reply_text(
-        "Alerts are on. You will be notified when a nearby crossing is about to close.\n"
+        "Alerts are on. You will be notified when a nearby crossing is estimated to close.\n"
         "/unsubscribe to stop."
     )
 
 
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     svc(context).unsubscribe(update.effective_user.id)
-    await update.message.reply_text("Alerts are off.")
+    await update.message.reply_text("Alerts are off. Use /clearlocation to remove your saved location.")
+
+
+async def clear_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop("awaiting", None)
+    svc(context).store.clear_user_location(update.effective_user.id)
+    await update.message.reply_text("Your saved location was removed and alerts are off.")

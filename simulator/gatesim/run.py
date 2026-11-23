@@ -12,13 +12,13 @@ import argparse
 import math
 from dataclasses import dataclass
 
-from gatesim.harness import LEAD_MIN, Look, run
+from gatesim.harness import CLEARANCE_MIN, LEAD_MIN, Look, run
 from gatesim.scenarios import Scenario, scenarios
 
 # Statuses that tell a person the gate is shut or about to shut.
 DANGER = {"closed", "closing_soon"}
 # Minutes after the engine reaches the gate that the app may still say closed.
-GRACE = 2.0
+GRACE = CLEARANCE_MIN
 # API estimates are rounded to one decimal place; truth is continuous.
 ROUNDING_MIN = 0.05
 
@@ -56,23 +56,25 @@ def judge(look: Look, tolerance: float) -> list[str]:
                                            and (eta is None or not math.isfinite(eta))):
             issues.append("INVALID_ESTIMATE")
     allowed_error = tolerance + ROUNDING_MIN + (look.report_age if look.stopped_report_ahead else 0) + 1e-9
-    if look.stopped_report_ahead and look.report_age >= 8:
+    if (look.report_ahead or look.stopped_report_ahead) and look.report_age >= 8:
         if said != "awaiting_update" or look.app_eta is not None or look.app_closes is not None or look.app_passed is not None:
             issues.append("STALE_COUNTDOWN")
         if look.viewed and (look.scene_status != "awaiting_update" or look.scene_eta is not None or look.scene_passed is not None):
             issues.append("STALE_VIEW")
         return issues
-    if said == "awaiting_update" or (look.viewed and look.scene_status == "awaiting_update"):
+    awaiting = said == "awaiting_update" or (look.viewed and look.scene_status == "awaiting_update")
+    awaiting_passage = (look.report_ahead or look.report_near_crossing) and look.true_eta is not None and look.true_eta <= 0
+    if awaiting and not awaiting_passage:
         issues.append("UNEXPECTED_UNRESOLVED")
     if look.viewed and (said is not None or look.scene_status in {"closed", "closing_soon", "approaching"}) and (said != look.scene_status or
                         (look.app_eta is not None and look.scene_eta is not None
                          and abs(look.app_eta - look.scene_eta) > 0.15)):
         issues.append("DISAGREEMENT")
-    if truth in DANGER and said is None:
+    if truth in DANGER and said is None and look.has_live_report:
         issues.append("MISSED")
-    if look.viewed and truth in DANGER and look.scene_status is None:
+    if look.viewed and truth in DANGER and look.scene_status is None and look.has_live_report:
         issues.append("VIEW_MISSED")
-    elif (truth in DANGER and said not in DANGER
+    elif (truth in DANGER and said not in DANGER and look.has_live_report and not awaiting_passage
           and (look.app_eta or 0) - (look.true_eta or 0) > allowed_error):
         issues.append("SAYS_OPEN")
     if said in DANGER and (
@@ -86,18 +88,26 @@ def judge(look: Look, tolerance: float) -> list[str]:
         and abs(look.app_eta - look.true_eta) > allowed_error
     ):
         issues.append(f"OFF {look.app_eta - look.true_eta:+.1f}")
-    gone = look.app_passed if look.app_passed is not None else look.scene_passed
+    pass_reports = (look.app_passed, look.scene_passed) if look.viewed else (look.app_passed,)
+    reported = [age for age in pass_reports if age is not None]
     if (
         look.near_gate
-        and not look.stopped_report_ahead
+        and look.has_live_report and not (look.report_ahead or look.report_near_crossing)
         and look.true_eta is not None
         and -4.5 <= look.true_eta <= -(GRACE + 0.5)
         and said is None
-        and gone is None
+        and any(age is None for age in pass_reports)
     ):
         issues.append("NO_PASSED")
-    if gone is not None and (look.true_eta is None or look.true_eta > 1.5):
+    if reported and (not look.has_live_report or look.report_ahead
+                     or look.true_eta is None or look.true_eta > 1.5):
         issues.append("EARLY_PASSED")
+    if any(not math.isfinite(age) or age < 0 for age in reported):
+        issues.append("INVALID_ESTIMATE")
+    elif reported and look.true_eta is not None and any(abs(age + look.true_eta) > allowed_error for age in reported):
+        issues.append("INVALID_ESTIMATE")
+    if len(reported) == 2 and abs(reported[0] - reported[1]) > 0.15:
+        issues.append("DISAGREEMENT")
     return issues
 
 
@@ -126,7 +136,7 @@ def _num(value: float | None) -> str:
     return "  -  " if value is None else f"{value:5.1f}"
 
 
-def _gate(eta: float | None, up_after: float = 1.0) -> str:
+def _gate(eta: float | None, up_after: float = GRACE) -> str:
     """Minutes until the barrier comes down, 'down' while it is, 'up' once the train has cleared."""
     if eta is None:
         return "  -  "

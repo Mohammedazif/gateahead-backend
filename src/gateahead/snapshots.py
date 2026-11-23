@@ -19,6 +19,7 @@ class SnapshotCache:
             "key TEXT PRIMARY KEY, payload TEXT, expires REAL NOT NULL DEFAULT 0, "
             "owner TEXT, lease_until REAL NOT NULL DEFAULT 0)"
         )
+        self.db.execute("CREATE INDEX IF NOT EXISTS provider_snapshots_expires ON provider_snapshots(expires)")
         self.pending: dict[str, asyncio.Task] = {}
 
     def peek(self, key: str) -> dict | None:
@@ -44,7 +45,6 @@ class SnapshotCache:
 
     async def _load(self, key: str, ttl: float, fetch: Callable[[], Awaitable[dict]]) -> dict:
         owner = uuid.uuid4().hex
-        self.db.execute("INSERT OR IGNORE INTO provider_snapshots (key) VALUES (?)", (key,))
         while True:
             now = time.time()
             row = self.db.execute(
@@ -53,9 +53,10 @@ class SnapshotCache:
             if row and row[0] is not None and row[1] > now:
                 return json.loads(row[0])
             claimed = self.db.execute(
-                "UPDATE provider_snapshots SET owner = ?, lease_until = ? "
-                "WHERE key = ? AND lease_until <= ? AND expires <= ?",
-                (owner, now + 120, key, now, now),
+                "INSERT INTO provider_snapshots (key, owner, lease_until) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET owner=excluded.owner, lease_until=excluded.lease_until "
+                "WHERE provider_snapshots.lease_until <= ? AND provider_snapshots.expires <= ?",
+                (key, owner, now + 120, now, now),
             ).rowcount
             if claimed:
                 break

@@ -3,10 +3,26 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
 _PATH = Path(__file__).resolve().parent / "data" / "india_cities.json"
+_LOCAL_ALIASES = {
+    "Bengaluru": ("ಬೆಂಗಳೂರು",),
+    "Chennai": ("சென்னை",),
+    "Delhi": ("दिल्ली", "ਦਿੱਲੀ"),
+    "Hyderabad": ("హైదరాబాద్", "حیدرآباد"),
+    "Kannur": ("കണ്ണൂർ",),
+    "Kochi": ("കൊച്ചി",),
+    "Kolkata": ("কলকাতা", "कोलकाता"),
+    "Kozhikode": ("കോഴിക്കോട്",),
+    "Mumbai": ("मुंबई",),
+    "New Delhi": ("नई दिल्ली",),
+    "Payyanur": ("പയ്യന്നൂർ",),
+    "Pune": ("पुणे",),
+    "Thiruvananthapuram": ("തിരുവനന്തപുരം",),
+}
 
 
 @dataclass(frozen=True)
@@ -20,7 +36,9 @@ class City:
 
 
 def _fold(value: str) -> str:
-    return " ".join(value.casefold().split())
+    folded = unicodedata.normalize("NFKC", value).casefold()
+    return " ".join("".join(char if unicodedata.category(char)[0] in "LMN" else " "
+                            for char in folded).split())
 
 
 def _load() -> tuple[City, ...]:
@@ -38,35 +56,40 @@ def _load() -> tuple[City, ...]:
         except (KeyError, TypeError, ValueError):
             continue
         aliases = tuple(str(item).strip() for item in row.get("a") or [] if str(item).strip())
-        cities.append(City(name, state, lat, lon, population, aliases))
+        cities.append(City(name, state, lat, lon, population, aliases + _LOCAL_ALIASES.get(name, ())))
     return tuple(cities)
 
 
 _CITIES = _load()
+_SEARCHABLE = tuple((city, (_fold(city.name), *map(_fold, city.aliases))) for city in _CITIES)
 
 
 def search_cities(query: str, limit: int = 8) -> list[City]:
     folded = _fold(query)
-    if len(folded) < 2 or limit < 1:
+    if not 2 <= len(folded) <= 100 or limit < 1 or not any(char.isalpha() for char in folded):
         return []
-    ranked: list[tuple[int, int, str, City]] = []
-    for city in _CITIES:
-        rank = _rank(folded, city)
-        if rank is None:
-            continue
-        ranked.append((rank, -city.population, city.name, city))
-    ranked.sort()
-    return [item[3] for item in ranked[:limit]]
+    ranked = []
+    compact = folded.replace(" ", "")
+    for city, labels in _SEARCHABLE:
+        rank = _rank(folded, compact, labels)
+        if rank is not None:
+            ranked.append((rank, city))
+    if not ranked and len(compact) >= 4:
+        ranked = [(6, city) for city, labels in _SEARCHABLE
+                  if any(_one_edit(compact, label.replace(" ", "")) for label in labels)]
+    ranked.sort(key=lambda item: (item[0], -item[1].population, item[1].name, item[1].state))
+    return [city for _, city in ranked[:limit]]
 
 
-def _rank(query: str, city: City) -> int | None:
-    labels = (_fold(city.name), *(_fold(alias) for alias in city.aliases))
+def _rank(query: str, compact: str, labels: tuple[str, ...]) -> int | None:
     best: int | None = None
     for index, label in enumerate(labels):
         if not label:
             continue
         if label == query:
             rank = 0
+        elif label.replace(" ", "") == compact:
+            rank = 1
         elif label.startswith(query):
             rank = 2
         elif any(part.startswith(query) for part in label.split()):
@@ -80,3 +103,19 @@ def _rank(query: str, city: City) -> int | None:
         if best is None or rank < best:
             best = rank
     return best
+
+
+def _one_edit(first: str, second: str) -> bool:
+    if abs(len(first) - len(second)) > 1:
+        return False
+    if len(first) > len(second):
+        first, second = second, first
+    for index, (a, b) in enumerate(zip(first, second)):
+        if a != b:
+            if len(first) < len(second):
+                return first[index:] == second[index + 1:]
+            return first[index + 1:] == second[index + 1:] or (
+                first[index:index + 2] == second[index:index + 2][::-1]
+                and first[index + 2:] == second[index + 2:]
+            )
+    return len(first) != len(second)

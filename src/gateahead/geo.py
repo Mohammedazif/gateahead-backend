@@ -97,6 +97,20 @@ def along_route(
 _JOIN_KM = 0.04
 
 
+def rail_ends_connect(first: list[tuple[float, float]], second: list[tuple[float, float]]) -> bool:
+    """Recognize aligned gaps in mapped ways without joining nearby parallel rails."""
+    if len(first) < 2 or len(second) < 2:
+        return False
+    for tip, inside in ((first[0], first[1]), (first[-1], first[-2])):
+        outward = _unit_heading(inside, tip)
+        if outward is None:
+            continue
+        for start, next_point in ((second[0], second[1]), (second[-1], second[-2])):
+            if _join_score(tip, km(tip, start), outward, start, next_point) is not None:
+                return True
+    return False
+
+
 def stitch_rail(
     rails: list[list[tuple[float, float]]],
     point: tuple[float, float],
@@ -140,20 +154,9 @@ def _grow(
                     continue
                 steps = list(reversed(line[:-1])) if reverse else line[1:]
                 next_point = next((point for point in steps if km(point, start) > 1e-6), None)
-                heading = _unit_heading(start, next_point) if next_point is not None else None
-                if heading is None:
-                    continue
-                alignment = _dot(*outward, *heading) if outward is not None else 1.0
-                # Nearby parallel tracks are separate lines, not a U-turn at a seam.
-                if alignment < -0.25:
-                    continue
-                if gap > 0.003 and outward is not None:
-                    gap_heading = _unit_heading(tip, start)
-                    forward = _dot(*outward, *gap_heading)
-                    lateral = gap * math.sqrt(max(0, 1 - forward * forward))
-                    if forward < 0 or lateral > 0.003:
-                        continue
-                candidates.append((gap, -alignment, index, start, steps))
+                score = _join_score(tip, gap, outward, start, next_point) if next_point is not None else None
+                if score is not None:
+                    candidates.append((*score, index, start, steps))
         if not candidates:
             return
         _gap, _turn, index, start, steps = min(candidates, key=lambda item: item[:3])
@@ -163,6 +166,27 @@ def _grow(
         else:
             chain[:0] = reversed(extra)
         used.add(index)
+
+
+def _join_score(
+    tip: tuple[float, float], gap: float, outward: tuple[float, float] | None,
+    start: tuple[float, float], next_point: tuple[float, float],
+) -> tuple[float, float] | None:
+    if gap > _JOIN_KM:
+        return None
+    heading = _unit_heading(start, next_point)
+    if heading is None:
+        return None
+    alignment = _dot(*outward, *heading) if outward is not None else 1.0
+    if alignment < -0.25:
+        return None
+    if gap > 0.003 and outward is not None:
+        gap_heading = _unit_heading(tip, start)
+        forward = _dot(*outward, *gap_heading)
+        lateral = gap * math.sqrt(max(0, 1 - forward * forward))
+        if forward < 0 or lateral > 0.003:
+            return None
+    return gap, -alignment
 
 
 def _unit_heading(start: tuple[float, float], end: tuple[float, float]) -> tuple[float, float] | None:

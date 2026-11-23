@@ -162,8 +162,9 @@ def test_the_dump_does_not_replace_a_known_halt_or_a_user_pin(tmp_path: Path):
     added = store.halt("DMYA")
     assert added is not None and added.source == "irgeoportal" and added.kind == "halt"
     near = store.crossings_near(12.093, 75.202, 500)
-    assert {item.id for item in near} == {"user:1:2", "ir:7"}
-    assert next(item for item in near if item.id == "user:1:2").name == "Crossing near PAY"
+    assert {item.id for item in near} == {"ir:7"}
+    saved_pin = store._conn.execute("SELECT name, added_by FROM crossings WHERE id=?", (pin.id,)).fetchone()
+    assert tuple(saved_pin) == ("Crossing near PAY", 1)
     assert store.crossings_near(28.6, 77.2, 1000) == []
     again = load_geoportal(store, stations, pois)
     assert again["stations_added"] == 0

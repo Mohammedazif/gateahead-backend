@@ -64,6 +64,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("start", handlers.start))
     app.add_handler(CommandHandler("help", handlers.help_command))
     app.add_handler(CommandHandler("setlocation", handlers.setlocation))
+    app.add_handler(CommandHandler("clearlocation", handlers.clear_location))
     app.add_handler(CommandHandler("markgate", handlers.markgate))
     app.add_handler(CommandHandler("nearby", handlers.nearby))
     app.add_handler(CommandHandler("predict", handlers.predict))

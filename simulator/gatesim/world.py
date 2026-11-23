@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from gateahead.geo import km as geo_km
 from gateahead.models import RouteStop
@@ -133,6 +133,13 @@ class SimTrain:
     # Minutes late on leaving each station; stations not listed keep the last value.
     delays: dict[str, float] = field(default_factory=dict)
     start_delay: float = 0.0
+    start_offset_days: int = 0
+
+    def origin_date(self, day: date) -> date:
+        return day + timedelta(days=self.start_offset_days)
+
+    def run_id(self, day: date) -> str:
+        return f"{self.number}:{self.origin_date(day).isoformat()}"
 
     def s_of(self, code: str) -> float:
         return BY_CODE[code].s
@@ -153,11 +160,12 @@ class SimTrain:
         """(call, km, actual arrive, actual depart) using the delay profile."""
         rows = []
         delay = self.start_delay
+        origin_shift = self.start_offset_days * 1440
         for index, call in enumerate(self.calls):
             arrive_delay = delay
             delay = self.delays.get(call.code, delay)
-            arrive = call.arrive + (arrive_delay if index else delay)
-            depart = call.depart + delay
+            arrive = call.arrive + origin_shift + (arrive_delay if index else delay)
+            depart = call.depart + origin_shift + delay
             if call.halts and index:
                 depart = max(depart, arrive + max(0.5, call.depart - call.arrive))
             else:
@@ -196,7 +204,7 @@ class SimTrain:
     def delay_at(self, index: int) -> float:
         rows = self.actual()
         call, _km, _arrive, depart = rows[index]
-        return depart - call.depart
+        return depart - call.depart - self.start_offset_days * 1440
 
     def timetable_rows(self) -> list[RouteStop]:
         stops = []
@@ -261,6 +269,7 @@ def live_payload(train: SimTrain, now_minute: float, feed: Feed, day: datetime) 
     base = {
         "success": True,
         "train_number": train.number,
+        "train_start_date": train.origin_date(day.date()).isoformat(),
         "train_name": train.name,
         "source": origin.code,
         "source_stn_name": origin.name.upper(),
@@ -283,12 +292,13 @@ def live_payload(train: SimTrain, now_minute: float, feed: Feed, day: datetime) 
     else:
         status = "T"
     upcoming_rows: list[dict] = [{"si_no": 0, "station_code": "", "station_name": "", "non_stops": []}]
-    delay_now = round(depart - current_call.depart) if status != "A" else round(arrive - current_call.arrive)
+    origin_shift = train.start_offset_days * 1440
+    delay_now = round(depart - current_call.depart - origin_shift) if status != "A" else round(arrive - current_call.arrive - origin_shift)
     if state == "before":
         delay_now = 0
     next_stop = None
     for call, call_km, _arr, _dep in rows[index + 1 :]:
-        eta = call.arrive + delay_now
+        eta = call.arrive + origin_shift + delay_now
         row = {
             "station_code": call.code,
             "station_name": BY_CODE[call.code].name.upper(),
@@ -353,13 +363,14 @@ def overpass_payload(lat: float, lon: float, radius_m: float) -> dict:
             elements.append(
                 {"type": "node", "id": gate.node, "lat": gate.coords[0], "lon": gate.coords[1], "tags": {"railway": "level_crossing"}}
             )
-            road = [point_at(gate.s), (gate.coords[0], gate.coords[1] + 0.004)]
+            y, x = gate.coords
             elements.append(
                 {
                     "type": "way",
                     "id": gate.node + 50000,
                     "tags": {"highway": "tertiary", "name": gate.road},
-                    "geometry": [{"lat": road[0][0], "lon": road[0][1] - 0.004}, {"lat": road[1][0], "lon": road[1][1]}],
+                    "nodes": [gate.node + 100_000, gate.node, gate.node + 200_000],
+                    "geometry": [{"lat": y, "lon": x - 0.004}, {"lat": y, "lon": x}, {"lat": y, "lon": x + 0.004}],
                 }
             )
     for station in STATIONS:

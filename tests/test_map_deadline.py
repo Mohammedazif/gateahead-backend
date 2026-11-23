@@ -80,9 +80,20 @@ def test_deadline_preserves_stale_map_without_making_it_fresh(clock):
     stale_at = clock[0] - osm._CACHE_TTL - 1
     osm._cache[KEY] = (stale_at, previous)
     session = FakeSession(clock, ["timeout", "timeout", "timeout"])
-    assert asyncio.run(osm.OsmClient(session).around(*KEY)) is previous
+    degraded = asyncio.run(osm.OsmClient(session).around(*KEY))
+    assert degraded.crossings == previous.crossings
+    assert degraded.map_warning == "map_busy"
+    assert degraded.map_age_seconds == int(clock[0] - stale_at)
     assert clock[0] - 1000 == 75
     assert osm._cache[KEY][0] == stale_at
+
+
+def test_map_older_than_the_fallback_window_is_not_returned(clock):
+    osm._cache[KEY] = (clock[0] - osm._MAX_STALE_AGE, osm.OsmAround([], [], [], False))
+    client = osm.OsmClient(FakeSession(clock, ["timeout", "timeout", "timeout"]))
+    result = asyncio.run(client.around(*KEY))
+    assert result.error == "map_busy"
+    assert KEY not in osm._cache
 
 
 def test_overall_deadline_is_enforced_even_if_transport_ignores_its_timeout(monkeypatch):
