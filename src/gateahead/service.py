@@ -98,7 +98,12 @@ class GateAhead:
     async def map_around(self, lat: float, lon: float) -> OsmAround:
         result = await self.osm.around(lat, lon, self.settings.nearby_radius_m)
         if not result.error:
-            self.store.reconcile_crossing_access({c.id for c in result.crossings}, result.excluded_crossing_ids)
+            self.store.reconcile_crossing_access(
+                {c.id for c in result.crossings},
+                result.excluded_crossing_ids,
+                public_points={c.coords for c in result.crossings},
+                excluded_points=result.excluded_crossing_points,
+            )
         saved = self.store.crossings_near(lat, lon, self.settings.nearby_radius_m)
         if result.error:
             if not saved:
@@ -121,7 +126,8 @@ class GateAhead:
         crossings = [replace(c, group_name=group_names[c.group_id]) if c.group_id else c for c in crossings]
         _remember_osm(self.store, stations)
         return OsmAround(crossings, stations, result.rails, result.has_highway,
-                         excluded_crossing_ids=result.excluded_crossing_ids)
+                         excluded_crossing_ids=result.excluded_crossing_ids,
+                         excluded_crossing_points=result.excluded_crossing_points)
 
     def set_location(self, user_id: int, lat: float, lon: float) -> User:
         return self.store.set_location(user_id, lat, lon)

@@ -6,6 +6,7 @@ import re
 import sqlite3
 import time
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -226,27 +227,47 @@ class Store:
         ).fetchall()
         return [_crossing(row) for row in rows]
 
-    def reconcile_crossing_access(self, public_ids: set[str], excluded_ids: set[str]) -> None:
+    def reconcile_crossing_access(
+        self, public_ids: set[str], excluded_ids: set[str], *,
+        public_points: Iterable[tuple[float, float]] = (),
+        excluded_points: Iterable[tuple[float, float]] = (),
+    ) -> None:
         """Remember exact OSM access evidence without changing user pins.
 
         Restricted rows stay hidden during map outages and process restarts.
         Only this reversible status is restored by later public map evidence;
         moderation rejections remain intact.
         """
-        self._conn.executemany(
-            """UPDATE crossings SET status='restricted'
-               WHERE source != 'user' AND status IN ('public', 'pending')
-                 AND (id=? OR osm_id=?)""",
-            [(key, key) for key in excluded_ids],
-        )
-        self._conn.executemany(
-            """UPDATE crossings SET status='public'
-               WHERE source != 'user' AND status='restricted'
-                 AND (id=? OR osm_id=?)""",
-            [(key, key) for key in public_ids],
-        )
-        if public_ids or excluded_ids:
-            self._conn.commit()
+        with self._conn:
+            self._conn.executemany(
+                """UPDATE crossings SET status='public'
+                   WHERE source != 'user' AND status='restricted'
+                     AND (id=? OR osm_id=?)""",
+                [(key, key) for key in public_ids],
+            )
+            # Imported records can have the same coordinates without an OSM ID.
+            # Allow coordinate rounding and keep neighbouring tracks distinct.
+            self._conn.executemany(
+                """UPDATE crossings SET status=?
+                   WHERE source='irgeoportal'
+                     AND lat BETWEEN ? - 0.000001 AND ? + 0.000001
+                     AND lon BETWEEN ? - 0.000001 AND ? + 0.000001
+                     AND status=?""",
+                [
+                    (new, lat, lat, lon, lon, old)
+                    for new, old, points in (
+                        ("public", "restricted", public_points),
+                        ("restricted", "public", excluded_points),
+                    )
+                    for lat, lon in points
+                ],
+            )
+            self._conn.executemany(
+                """UPDATE crossings SET status='restricted'
+                   WHERE source != 'user' AND status IN ('public', 'pending')
+                     AND (id=? OR osm_id=?)""",
+                [(key, key) for key in excluded_ids],
+            )
 
     def crossings_near(self, lat: float, lon: float, radius_m: float) -> list[Crossing]:
         radius_km = max(0.0, radius_m) / 1000.0

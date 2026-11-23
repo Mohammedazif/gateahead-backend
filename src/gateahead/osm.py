@@ -9,7 +9,7 @@ import aiohttp
 
 from gateahead.geo import km
 from gateahead.models import Crossing, Station
-from gateahead.crossing_roads import road_crossings
+from gateahead.crossing_roads import FREIGHT_NAME, FREIGHT_OPERATOR, road_crossings
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OVERPASS_URLS = (
@@ -35,11 +35,13 @@ class OsmAround:
     has_highway: bool
     error: str | None = None
     excluded_crossing_ids: set[str] = field(default_factory=set)
+    excluded_crossing_points: set[tuple[float, float]] = field(default_factory=set)
 
 
 def _around_query(lat: float, lon: float, radius_m: float) -> str:
     r = int(radius_m)
     road = max(120, int(radius_m / 5))
+    facility = '[~"^(landuse|railway|building)$"~"^(industrial|railway|yard|warehouse)$"]'
     return f"""
     [out:json][timeout:25];
     (
@@ -50,6 +52,9 @@ def _around_query(lat: float, lon: float, radius_m: float) -> str:
       .crossings;
       way(bn.crossings)["highway"];
       way(bn.crossings)["railway"];
+      way{facility}["name"~"{FREIGHT_NAME}",i](around:{r},{lat},{lon});
+      way{facility}["name:en"~"{FREIGHT_NAME}",i](around:{r},{lat},{lon});
+      way{facility}["operator"~"{FREIGHT_OPERATOR}",i](around:{r},{lat},{lon});
       node["railway"="halt"](around:60000,{lat},{lon});
       node["railway"="station"](around:60000,{lat},{lon});
       way["railway"="station"](around:60000,{lat},{lon});
@@ -76,7 +81,8 @@ def parse_overpass(payload: dict, origin: tuple[float, float]) -> tuple[list[Cro
             raise ValueError("Map provider returned invalid tags")
         tags = el.get("tags") or {}
         if any(tags.get(key) is not None and not isinstance(tags[key], str)
-               for key in ("railway", "highway", "ref", "name", "name:en", "access", "vehicle", "motor_vehicle")):
+               for key in ("railway", "highway", "ref", "name", "name:en", "access", "vehicle", "motor_vehicle",
+                           "operator", "landuse", "building", "usage", "service")):
             raise ValueError("Map provider returned invalid tags")
         kind = el.get("type")
         railway = tags.get("railway", "")
@@ -206,13 +212,14 @@ class OsmClient:
             except ValueError:
                 last_error = "map_unavailable"
                 continue
-            candidates = {f"osm:node:{el.get('id')}" for el in payload["elements"]
+            candidates = {f"osm:node:{el.get('id')}": coords for el in payload["elements"]
                           if el.get("type") == "node"
                           and (el.get("tags") or {}).get("railway") in {"level_crossing", "crossing"}
-                          and _element_coords(el) is not None}
-            excluded = candidates - {c.id for c in crossings}
+                          and (coords := _element_coords(el)) is not None}
+            excluded = candidates.keys() - {c.id for c in crossings}
+            excluded_points = {candidates[key] for key in excluded} - {c.coords for c in crossings}
             result = OsmAround(crossings, stations, rails, has_highway,
-                               excluded_crossing_ids=excluded)
+                               excluded_crossing_ids=excluded, excluded_crossing_points=excluded_points)
             _cache[key] = (now, result)
             return result
         if cached:

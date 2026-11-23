@@ -31,12 +31,15 @@ def fixture(area):
     return json.loads((Path(__file__).parent / "fixtures" / f"osm_{area}_crossings.json").read_text())
 
 
-def test_actual_fci_private_nodes_are_removed_without_city_specific_rules():
+def test_actual_fci_godown_points_stay_hidden_when_access_tags_are_missing():
     payload = fixture("peelamedu")
     private = {f"osm:node:{n['id']}" for n in payload["elements"]
                if n["type"] == "node" and n["tags"].get("access") == "private"}
-    crossings, _, rails, _ = parse_overpass(payload, (11.029, 77.001))
     assert len(private) == 26
+    for element in payload["elements"]:
+        if element["tags"].get("access") == "private":
+            del element["tags"]["access"]
+    crossings, _, rails, _ = parse_overpass(payload, (11.029, 77.001))
     assert not private.intersection(c.id for c in crossings)
     assert {c.id for c in crossings} == {
         "osm:node:296492201", "osm:node:4512893177", "osm:node:4522282475", "osm:node:4522282476",
@@ -140,11 +143,27 @@ def test_only_retained_public_members_count_toward_group_size():
     assert {c.group_size for c in crossings} == {2}
 
 
+def test_goods_shed_filters_service_roads_but_keeps_public_roads_across_its_tracks():
+    goods, public, open_service, unrelated = (node(i, 75 + i * .0001) for i in range(1, 5))
+    for point in (goods, public, open_service, unrelated):
+        point["lat"] = 30.9
+    rail = {"type": "way", "id": 20, "nodes": [1, 2, 3],
+            "tags": {"railway": "rail", "name": "Railway Goods Shed"}}
+    payload = {"elements": [goods, public, open_service, unrelated, rail,
+                      road(10, [goods], highway="service"),
+                      road(11, [public]),
+                      road(12, [open_service], highway="service", motor_vehicle="yes"),
+                      road(13, [unrelated], highway="service")]}
+    crossings, _, _, _ = parse_overpass(payload, (30.9, 75))
+    assert {c.id for c in crossings} == {"osm:node:2", "osm:node:3", "osm:node:4"}
+
+
 def test_map_query_fetches_connected_roads_across_full_crossing_radius():
     query = _around_query(12, 75, 10000)
     assert 'node["railway"="level_crossing"](around:10000,12,75)' in query
     assert 'way(bn.crossings)["highway"]' in query
     assert 'way(bn.crossings)["railway"]' in query
+    assert '["name:en"~' in query and '["operator"~' in query and 'godowns?' in query
 
 
 def test_map_client_carries_exact_rejected_ids_to_saved_crossing_merge(monkeypatch):
@@ -221,3 +240,49 @@ def test_gates_api_exposes_group_metadata_without_collapsing_original_ids(monkey
             assert {g["group_size"] for g in body["gates"]} == {2}
             assert {g["road"] for g in body["gates"]} == {"Station Road"}
     asyncio.run(run())
+
+
+def test_fci_crossings_are_hidden_from_map_and_details_even_when_saved(monkeypatch, tmp_path):
+    monkeypatch.setattr("gateahead.osm._cache", {})
+    import gateahead.api.app as api
+    payload = fixture("peelamedu")
+
+    class Response:
+        status = 200
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return False
+        async def json(self, **kwargs): return payload
+
+    class Session:
+        def post(self, *args, **kwargs): return Response()
+
+    store = Store(tmp_path / "gates.db")
+    freight_id = "osm:node:4518094360"
+    freight_point = (11.0344613, 76.9973631)
+    store.save_crossing(Crossing("ir:1", "FCI Godown", *freight_point, "irgeoportal", osm_id=freight_id))
+    store.save_crossing(Crossing("ir:2", "Level crossing", *freight_point, "irgeoportal"))
+    service = GateAhead(SimpleNamespace(nearby_radius_m=10000), store, Session())
+    service._positions = AsyncMock()
+    monkeypatch.setattr(api, "_service", service)
+
+    async def run():
+        area = {"lat": 11.029, "lon": 77.001}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://test") as client:
+            body = (await client.get("/gates", params=area)).json()
+            assert {g["id"] for g in body["gates"]} == {
+                "osm:node:296492201", "osm:node:4512893177",
+                "osm:node:4522282475", "osm:node:4522282476",
+            }
+            for crossing_id in (freight_id, "ir:1", "ir:2"):
+                scene = await service.scene_here(**area, crossing_id=crossing_id)
+                assert scene["error"] == "crossing_not_found"
+                assert scene["trains"] == []
+            assert not store.public_crossings()
+            service._positions.assert_not_called()
+
+    try:
+        asyncio.run(run())
+        store.reconcile_crossing_access({freight_id}, set(), public_points={freight_point})
+        assert {c.id for c in store.public_crossings()} == {"ir:1", "ir:2"}
+    finally:
+        store._conn.close()

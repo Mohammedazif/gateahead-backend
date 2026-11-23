@@ -6,6 +6,7 @@ several tracks; they do not replace the nodes used for train predictions.
 from __future__ import annotations
 
 import heapq
+import re
 from collections import defaultdict
 from dataclasses import replace
 
@@ -17,6 +18,11 @@ _RESTRICTED = {"no", "private", "customers", "delivery", "agricultural", "forest
 _FOOTWAYS = {"footway", "path", "cycleway", "bridleway", "steps", "pedestrian", "platform"}
 _NON_ROADS = {"construction", "proposed", "abandoned", "razed", "raceway", "corridor"}
 _MOTOR_ACCESS = {"yes", "designated", "permissive", "destination"}
+FREIGHT_OPERATOR = r"Food[ .-]+Cor(poration|pn)[. ]+of[ .-]+India|^F[. ]*C[. ]*I[.]?$"
+FREIGHT_NAME = (r"(^|[^A-Za-z0-9])F[. ]*C[. ]*I([. ]|[^A-Za-z0-9]|$)|"
+                r"Food[ .-]+Cor(poration|pn)[. ]+of[ .-]+India|"
+                r"(goods?|freight)[ -]+(sheds?|yards?|depots?|terminals?|godowns?|warehouses?)|"
+                r"(railway|railroad).*(godown|warehouse)|goods[ -]+loading")
 
 
 def _access(tags: dict) -> str:
@@ -35,6 +41,39 @@ def _public_road(tags: dict) -> bool:
     return True
 
 
+def _name(tags: dict) -> str:
+    return tags.get("name:en") or tags.get("name") or ""
+
+
+def _freight_name(tags: dict) -> bool:
+    return bool(any(re.search(FREIGHT_NAME, tags.get(key) or "", re.I) for key in ("name", "name:en"))
+                or re.search(FREIGHT_OPERATOR, tags.get("operator") or "", re.I))
+
+
+def _footprints(elements: list[dict]) -> list[list[tuple[float, float]]]:
+    footprints = []
+    for el in elements:
+        tags = el.get("tags") or {}
+        if (el.get("type") != "way" or not _freight_name(tags)
+                or (tags.get("landuse") not in {"industrial", "railway"}
+                    and tags.get("railway") != "yard" and tags.get("building") != "warehouse")):
+            continue
+        ring = [(float(p["lat"]), float(p["lon"])) for p in el.get("geometry") or []
+                if isinstance(p, dict) and p.get("lat") is not None and p.get("lon") is not None]
+        if len(ring) >= 4 and ring[0] == ring[-1]:
+            footprints.append(ring)
+    return footprints
+
+
+def _contains(point: tuple[float, float], ring: list[tuple[float, float]]) -> bool:
+    lat, lon = point
+    inside = False
+    for (y1, x1), (y2, x2) in zip(ring, ring[1:]):
+        if (y1 > lat) != (y2 > lat) and lon < x1 + (x2 - x1) * (lat - y1) / (y2 - y1):
+            inside = not inside
+    return inside
+
+
 def road_crossings(candidates: list[Crossing], elements: list[dict]) -> list[Crossing]:
     nodes = {c.osm_id.removeprefix("osm:node:"): c for c in candidates}
     node_tags = {
@@ -48,12 +87,18 @@ def road_crossings(candidates: list[Crossing], elements: list[dict]) -> list[Cro
     connected: dict[str, list[dict]] = defaultdict(list)
     graph: dict[str, dict[str, float]] = defaultdict(dict)
     rails: dict[str, set[str]] = defaultdict(set)
+    freight_rails: set[str] = set()
     for el in elements:
         tags = el.get("tags") or {}
         if el.get("type") == "way" and tags.get("railway"):
+            freight = tags.get("railway") == "rail" and (
+                tags.get("usage") == "industrial" or tags.get("service") == "yard" or _freight_name(tags)
+            )
             for key in el.get("nodes") or []:
                 if str(key) in nodes:
                     rails[str(key)].add(str(el.get("id")))
+                    if freight:
+                        freight_rails.add(str(key))
         if el.get("type") != "way" or not tags.get("highway"):
             continue
         raw_ids = el.get("nodes") or []
@@ -84,9 +129,11 @@ def road_crossings(candidates: list[Crossing], elements: list[dict]) -> list[Cro
             graph[b][a] = graph[a][b]
 
     retained: dict[str, Crossing] = {}
+    footprints = _footprints(elements)
     for key, crossing in nodes.items():
         tags = node_tags.get(key, {})
-        if _access(tags) in _RESTRICTED:
+        access = _access(tags)
+        if access in _RESTRICTED:
             continue
         roads = connected.get(key, [])
         public = [road for road in roads if _public_road(road)]
@@ -96,7 +143,15 @@ def road_crossings(candidates: list[Crossing], elements: list[dict]) -> list[Cro
         # when the connected road explicitly supplies vehicle access evidence.
         if not roads and tags.get("railway") == "crossing":
             continue
-        names = sorted({r.get("name:en") or r.get("name") or r.get("ref") or "" for r in public} - {""})
+        # Service roads often have no access tag inside a depot. A connected
+        # street or explicit vehicle permission is stronger evidence of access.
+        through_road = any(r["highway"] != "service" or _access(r) in _MOTOR_ACCESS for r in public)
+        if not through_road and access not in _MOTOR_ACCESS and (
+            _freight_name(tags) or any(_contains(crossing.coords, ring) for ring in footprints)
+            or (bool(public) and key in freight_rails)
+        ):
+            continue
+        names = sorted({_name(r) or r.get("ref") or "" for r in public} - {""})
         road = names[0] if names else ""
         retained[key] = replace(crossing, road=road,
                                 name=road if road and crossing.name == "Level crossing" else crossing.name)
