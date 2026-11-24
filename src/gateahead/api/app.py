@@ -36,6 +36,7 @@ from gateahead.phone_alerts import (
     SavedGateAlert,
 )
 from gateahead.place import lookup_place
+from gateahead.prediction_checks import PredictionChecks
 from gateahead.push_delivery import FCMPushDelivery
 from gateahead.service import GateAhead, crossing_distances
 from gateahead.reports import Reports
@@ -70,6 +71,7 @@ _settings = load_settings()
 _store = Store(_settings.db_path)
 _reports = Reports(_settings.db_path)
 _phone_alerts = PhoneAlertStore(_settings.db_path)
+_prediction_checks = PredictionChecks()
 _session: aiohttp.ClientSession | None = None
 _service: GateAhead | None = None
 _maintenance: asyncio.Task | None = None
@@ -118,6 +120,7 @@ async def shutdown() -> None:
     if _maintenance:
         _maintenance.cancel()
         await asyncio.gather(_maintenance, return_exceptions=True)
+    await _prediction_checks.shutdown()
     if _service:
         await _service.snapshots.shutdown()
     if _session:
@@ -444,12 +447,31 @@ def _limit(request: Request, bucket: str = "predictions", cap: int = _LIMIT) -> 
 @app.get("/predict")
 async def predict(
     request: Request,
+    response: Response,
     lat: float = Query(..., ge=-90, le=90, allow_inf_nan=False),
     lon: float = Query(..., ge=-180, le=180, allow_inf_nan=False),
+    progressive: bool = False,
 ) -> dict:
     _limit(request)
     assert _service is not None
-    return await _service.predict_here(lat, lon)
+    if not progressive:
+        return await _service.predict_here(lat, lon)
+    service = _service
+    check = _prediction_checks.start(lat, lon, lambda update: service.predict_here(lat, lon, on_update=update))
+    if check is None:
+        raise HTTPException(status_code=503, detail="Train checks are busy. Try again shortly.",
+                            headers={"Retry-After": "15"})
+    response.headers["Cache-Control"] = "no-store"
+    return check.response()
+
+
+@app.get("/predict/checks/{check_id}")
+async def prediction_check(check_id: str, response: Response, after: int = Query(0, ge=0)) -> dict:
+    check = _prediction_checks.get(check_id)
+    if check is None:
+        raise HTTPException(status_code=404, detail="This train check has expired.")
+    response.headers["Cache-Control"] = "no-store"
+    return check.response(after)
 
 
 @app.get("/scene")

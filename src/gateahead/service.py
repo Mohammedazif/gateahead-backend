@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from math import cos, hypot, radians
@@ -240,6 +241,7 @@ class GateAhead:
 
     async def _positions(
         self, stations: list[Station], lat: float, lon: float, *, deadline: float | None = None,
+        on_batch: Callable[[PositionBatch], None] | None = None,
     ) -> PositionBatch:
         loop = asyncio.get_running_loop()
         remaining = _TRACKING_BUDGET if deadline is None else max(0, deadline - loop.time())
@@ -307,12 +309,92 @@ class GateAhead:
 
         pending.sort(key=priority)
         selected = pending[:self.settings.live_check_budget]
+        routes = {requests[key].number: cached[requests[key].number] for key in cold}
+        last_update = float("-inf")
+
+        def wanted_keys() -> list[str]:
+            return [
+                key for key in hot
+                if key in looks and (looks[key].moving is not None or not looks[key].finished)
+                and looks[key].operating_status == "running"
+            ]
+
+        def make_batch(available_routes: dict[str, SavedRoute], *, checking: bool = False) -> PositionBatch:
+            checked_at = datetime.now(INDIA)
+            positions = positions_from_looks(wanted_keys(), looks, available_routes, checked_at)
+            for key in cold:
+                request = requests[key]
+                route = available_routes.get(request.number)
+                if route is not None:
+                    placed = scheduled_position(request.number, route, lat, lon, checked_at, request.start)
+                    if placed is not None:
+                        positions.append(placed)
+            # Live names also help future timetable-only estimates after a restart.
+            if not checking:
+                self.store.remember_train_names({
+                    position.train_number: position.name for position in positions if position.name.strip()
+                })
+            names = self.store.train_names(numbers)
+            positions = [
+                name_position(position, names.get(position.train_number, ""),
+                              route_for_start(available_routes.get(position.train_number), position.start_date))
+                for position in positions
+            ]
+            updates = [{"number": requests[key].number, "start_date": look.start_date,
+                        "run_id": f"{requests[key].number}:{look.start_date}" if look.start_date else key,
+                        "status": look.operating_status, "notice": look.notice} for key, look in looks.items()
+                       if look.operating_status in {"cancelled", "diverted", "partially_cancelled"}]
+            missing = sum(number not in cached and number not in available_routes for number in numbers)
+            unfinished = sum(key not in looks for key in pending)
+            unavailable = sum(look.moving is None and not look.finished and
+                              look.operating_status in {"unknown", "running"} for look in looks.values())
+            stale = sum(position.observed and
+                        (not position.report_age_known or position.age_minutes >= REPORT_FRESH_MIN)
+                        for position in positions)
+            incomplete = checking or timed_out or unavailable_discovery or missing or unfinished or unavailable or stale
+            return PositionBatch(numbers, positions, available_routes, {
+                "status": "partial" if incomplete else "complete",
+                **({"checking": True} if checking else {}),
+                "national_coverage_verified": False,
+                "candidates": len(numbers),
+                "run_candidates": len(requests),
+                "live_candidates": len(hot),
+                "live_checked": len(looks),
+                "live_reports": sum(look.moving is not None for look in looks.values()),
+                "unavailable_live": unavailable,
+                "stale_live": stale,
+                "unavailable_discovery": unavailable_discovery,
+                "pending_live": unfinished,
+                "missing_or_stale_routes": missing,
+                "scheduled_candidates": len(cold),
+                "limited": bool(unfinished),
+                "deadline_exhausted": timed_out,
+            }, updates)
+
+        def publish() -> None:
+            nonlocal last_update
+            if on_batch is None or loop.time() - last_update < 1:
+                return
+            batch = make_batch({**cached, **routes}, checking=True)
+            if batch.positions or batch.service_updates:
+                last_update = loop.time()
+                on_batch(batch)
+
+        publish()
         if selected:
             tasks = [asyncio.create_task(one(number)) for number in selected]
+            waiting = set(tasks)
             try:
-                done, waiting = await asyncio.wait(tasks, timeout=max(0, deadline - loop.time() - 2))
+                while waiting:
+                    done, waiting = await asyncio.wait(
+                        waiting, timeout=max(0, deadline - loop.time() - 2),
+                        return_when=asyncio.FIRST_COMPLETED if on_batch else asyncio.ALL_COMPLETED,
+                    )
+                    looks.update(task.result() for task in tasks if task in done)
+                    if not done:
+                        break
+                    publish()
                 timed_out |= bool(waiting)
-                looks.update(task.result() for task in tasks if task in done)
             finally:
                 for task in tasks:
                     if not task.done():
@@ -320,73 +402,44 @@ class GateAhead:
                 await asyncio.gather(*tasks, return_exceptions=True)
         completed = [key for key in selected if key in looks]
         self.store.record_live_checks(completed)
-        wanted = [
-            number
-            for number in hot
-            if number in looks and (looks[number].moving is not None or not looks[number].finished)
-            and looks[number].operating_status == "running"
-        ]
-        routes = {requests[key].number: cached[requests[key].number] for key in cold}
-        wanted_numbers = list(dict.fromkeys(requests[key].number for key in wanted))
+        wanted_numbers = list(dict.fromkeys(requests[key].number for key in wanted_keys()))
+
+        def route_ready(number: str, route: SavedRoute) -> None:
+            routes[number] = route
+            publish()
+
         try:
             async with asyncio.timeout_at(deadline):
-                routes.update(await self._routes(wanted_numbers))
+                if on_batch is None:
+                    routes.update(await self._routes(wanted_numbers))
+                else:
+                    routes.update(await self._routes(wanted_numbers, on_route=route_ready))
         except TimeoutError:
             timed_out = True
             routes.update(self._cached_routes(wanted_numbers))
-        now = datetime.now(INDIA)
-        positions = positions_from_looks(wanted, looks, routes, now)
-        for key in cold:
-            request = requests[key]
-            route = routes.get(request.number)
-            if route is None:
-                continue
-            placed = scheduled_position(request.number, route, lat, lon, now, request.start)
-            if placed is not None:
-                positions.append(placed)
-        # Live names also help future timetable-only estimates after a restart.
-        self.store.remember_train_names({position.train_number: position.name for position in positions if position.name.strip()})
-        names = self.store.train_names(numbers)
-        positions = [name_position(position, names.get(position.train_number, ""),
-                                   route_for_start(routes.get(position.train_number), position.start_date))
-                     for position in positions]
-        updates = [{"number": requests[key].number, "start_date": look.start_date,
-                    "run_id": f"{requests[key].number}:{look.start_date}" if look.start_date else key,
-                    "status": look.operating_status, "notice": look.notice} for key, look in looks.items()
-                   if look.operating_status in {"cancelled", "diverted", "partially_cancelled"}]
-        missing = sum(number not in cached and number not in routes for number in numbers)
-        unfinished = len(pending) - len(completed)
-        unavailable = sum(look.moving is None and not look.finished and
-                          look.operating_status in {"unknown", "running"} for look in looks.values())
-        stale = sum(position.observed and
-                    (not position.report_age_known or position.age_minutes >= REPORT_FRESH_MIN) for position in positions)
-        incomplete = timed_out or unavailable_discovery or missing or unfinished or unavailable or stale
-        return PositionBatch(numbers, positions, routes, {
-            "status": "partial" if incomplete else "complete",
-            "national_coverage_verified": False,
-            "candidates": len(numbers),
-            "run_candidates": len(requests),
-            "live_candidates": len(hot),
-            "live_checked": len(looks),
-            "live_reports": sum(look.moving is not None for look in looks.values()),
-            "unavailable_live": unavailable,
-            "stale_live": stale,
-            "unavailable_discovery": unavailable_discovery,
-            "pending_live": unfinished,
-            "missing_or_stale_routes": missing,
-            "scheduled_candidates": len(cold),
-            "limited": bool(unfinished),
-            "deadline_exhausted": timed_out,
-        }, updates)
+        return make_batch(routes)
 
     async def predict_here(
         self, lat: float, lon: float, *, budget_seconds: float = _TRACKING_BUDGET,
         alert_gate_ids: frozenset[str] = frozenset(),
+        on_update: Callable[[dict], None] | None = None,
     ) -> dict:
         deadline = asyncio.get_running_loop().time() + min(_TRACKING_BUDGET, budget_seconds)
         mapped = await self.map_around(lat, lon)
         if mapped.error:
             return {"error": mapped.error, "crossings": 0, "stations": [], "checked": 0, "running": 0, "approaching": [], "passed": [], "sightings": []}
+        if on_update is None:
+            batch = await self._positions(mapped.stations, lat, lon, deadline=deadline)
+        else:
+            def publish(partial: PositionBatch) -> None:
+                on_update(self._prediction_response(lat, lon, mapped, partial, alert_gate_ids))
+
+            batch = await self._positions(mapped.stations, lat, lon, deadline=deadline, on_batch=publish)
+        return self._prediction_response(lat, lon, mapped, batch, alert_gate_ids)
+
+    def _prediction_response(
+        self, lat: float, lon: float, mapped: OsmAround, batch: PositionBatch, alert_gate_ids: frozenset[str],
+    ) -> dict:
         crossings, stations = mapped.crossings, mapped.stations
         clusters = cluster_crossings(crossings)
         focus = {
@@ -397,7 +450,6 @@ class GateAhead:
         if not focus:
             nearest = sorted(clusters, key=lambda cluster: km((lat, lon), (cluster.lat, cluster.lon)))
             focus = {cluster.id for cluster in nearest[:3]}
-        batch = await self._positions(stations, lat, lon, deadline=deadline)
         numbers, positions, routes = batch
         approaching: list[dict] = []
         gate_predictions: list[dict] = []
@@ -415,6 +467,10 @@ class GateAhead:
         }
         for position in positions:
             route = route_for_start(routes.get(position.train_number), position.start_date)
+            if getattr(batch, "coverage", {}).get("checking") and route is None:
+                if _on_this_stretch(position, lat, lon, local_codes):
+                    sightings.append(_sighting(position, None, False))
+                continue
             stops = route.stops if route else []
             best: tuple[float, object, str | None] | None = None
             hits = []
@@ -534,7 +590,9 @@ class GateAhead:
                 found[number] = locate_route(cached, self.store.halt_coords)
         return found
 
-    async def _routes(self, numbers: list[str]) -> dict[str, SavedRoute]:
+    async def _routes(
+        self, numbers: list[str], *, on_route: Callable[[str, SavedRoute], None] | None = None,
+    ) -> dict[str, SavedRoute]:
         self.store.remember_train_candidates(numbers)
         found = self._cached_routes(numbers)
         missing: list[str] = []
@@ -557,6 +615,8 @@ class GateAhead:
                     self.store.record_route_failure(number)
                     return number, None
                 self.store.save_route(number, route.stops, route.run_days, variants=route.variants)
+                if on_route is not None:
+                    on_route(number, route)
                 return number, route
 
         for number, route in await asyncio.gather(*[one(number) for number in missing]):

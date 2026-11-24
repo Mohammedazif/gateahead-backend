@@ -72,6 +72,52 @@ def test_predictions_and_scenes_share_a_limit_and_return_retry_after(feature_api
     asyncio.run(run())
 
 
+def test_progressive_prediction_reuses_active_area_and_serves_new_revisions(feature_api, monkeypatch):
+    from gateahead.prediction_checks import PredictionChecks
+
+    api, service = feature_api
+    checks = PredictionChecks()
+    monkeypatch.setattr(api, "_prediction_checks", checks)
+
+    async def run():
+        first_result = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def predict(lat, lon, *, on_update):
+            service.prediction_calls += 1
+            on_update({"checked": 1, "coverage": {"status": "partial", "checking": True}})
+            first_result.set()
+            await finish.wait()
+            return {"checked": 2}
+
+        monkeypatch.setattr(service, "predict_here", predict)
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://test") as client:
+                params = {"lat": 12.1, "lon": 75.2, "progressive": True}
+                opened = await client.get("/predict", params=params)
+                assert opened.headers["cache-control"] == "no-store"
+                assert opened.json()["done"] is False
+                check_id = opened.json()["check_id"]
+                check_path = f"/predict/checks/{check_id}"
+                await asyncio.wait_for(first_result.wait(), timeout=1)
+                duplicate = await client.get("/predict", params=params)
+                assert duplicate.json()["check_id"] == check_id
+                partial = (await client.get(check_path)).json()
+                assert partial["done"] is False and partial["result"]["checked"] == 1
+                unchanged = (await client.get(check_path, params={"after": partial["revision"]})).json()
+                assert "result" not in unchanged
+                finish.set()
+                await asyncio.wait_for(checks.get(check_id).task, timeout=1)
+                final = (await client.get(check_path, params={"after": partial["revision"]})).json()
+                assert final["done"] is True and final["result"]["checked"] == 2
+                assert service.prediction_calls == 1
+                assert (await client.get("/predict/checks/unknown")).status_code == 404
+        finally:
+            await checks.shutdown()
+
+    asyncio.run(run())
+
+
 def test_catalog_coverage_reads_no_upstream_data(feature_api, tmp_path, monkeypatch):
     from gateahead.store import Store
 
