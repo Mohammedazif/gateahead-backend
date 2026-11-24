@@ -1,6 +1,8 @@
 """Persistence, discovery recovery and real journey instances under operating exceptions."""
 import asyncio
 import json
+import sqlite3
+from contextlib import closing
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -11,9 +13,11 @@ import pytest
 from gateahead import config, erail, live, service as service_module
 from gateahead.catalog import sync_catalog
 from gateahead.clock import INDIA
+from gateahead.crossing_details import record_crossing_flag
 from gateahead.database import consolidate
 from gateahead.models import Crossing, Halt, SavedRoute, User
 from gateahead.osm import OsmAround
+from gateahead.phone_alerts import PhoneAlertStore
 from gateahead.runs import requests_for
 from gateahead.service import GateAhead, resolve_position
 from gateahead.snapshots import SnapshotCache
@@ -78,6 +82,54 @@ def test_consolidation_retains_newest_routes_and_users_with_recoverable_backups(
     assert consolidate(target, source)["imported"]["train_routes"] == 0
     original._conn.close()
     restored._conn.close()
+
+
+def test_consolidation_preserves_alert_revocations_and_accepted_messages(tmp_path):
+    target, source = tmp_path / "persistent.db", tmp_path / "previous.db"
+    for path in (target, source):
+        Store(path)._conn.close()
+        PhoneAlertStore(path)
+
+    def bind(db, device, revision, *, enrolled=True):
+        db.execute(
+            "INSERT INTO phone_alert_revisions(device,revision,request_digest,updated_at) VALUES(?,?,?,?)",
+            (device, revision, device * revision, 200),
+        )
+        if enrolled:
+            db.execute(
+                "INSERT INTO phone_registrations(device,fid,gates,updated_at,verified_at) VALUES(?,?,?,?,?)",
+                (device, device.decode(), "[]", 200, 190),
+            )
+
+    with closing(sqlite3.connect(target)) as db, db:
+        bind(db, b"revoked", 2)
+        bind(db, b"already-off", 4, enrolled=False)
+    with closing(sqlite3.connect(source)) as db, db:
+        bind(db, b"revoked", 2, enrolled=False)
+        db.execute("UPDATE phone_alert_revisions SET request_digest=? WHERE device=?",
+                   (b"revoked-digest", b"revoked"))
+        bind(db, b"already-off", 3)
+        bind(db, b"kept", 2)
+        db.executemany(
+            """INSERT INTO phone_alert_deliveries(device,crossing_id,run_id,created_at,accepted_at,expires_at)
+               VALUES(?,?,?,?,?,?)""",
+            [(b"kept", "gate", "16512:2026-11-24", 300, 301, 500),
+             (b"kept", "gate", "16512:2026-11-25", 300, None, 500)],
+        )
+    record_crossing_flag(source, "gate", "example-installation")
+
+    for _ in range(2):
+        result = consolidate(target, source)
+        assert Path(result["backups"]).stat().st_mode & 0o077 == 0
+        with closing(sqlite3.connect(target)) as db:
+            assert db.execute("SELECT device,verified_at FROM phone_registrations").fetchall() == [(b"kept", 190)]
+            assert db.execute(
+                "SELECT revision,request_digest FROM phone_alert_revisions WHERE device=?", (b"revoked",)
+            ).fetchone() == (2, b"revoked-digest")
+            assert db.execute("SELECT run_id,accepted_at FROM phone_alert_deliveries").fetchall() == [
+                ("16512:2026-11-24", 301)
+            ]
+            assert db.execute("SELECT crossing_id FROM crossing_detail_flags").fetchone() == ("gate",)
 
 
 def test_api_bot_and_worker_connections_share_durable_identity_and_progress(tmp_path):

@@ -12,6 +12,7 @@ import aiohttp
 from gateahead.clusters import cluster_crossings, gate_label
 from gateahead.clock import INDIA
 from gateahead.config import Settings
+from gateahead.crossing_details import CrossingDetails
 from gateahead.erail import TrainRows, known_train_names, station_rows, train_rows
 from gateahead.geo import km, stitch_rail
 from gateahead.live import LiveLook, cached_live, fetch_live, position_from_lts
@@ -102,6 +103,7 @@ class GateAhead:
         self.session = session
         self.osm = OsmClient(session)
         self.snapshots = SnapshotCache(store.path)
+        self.crossing_details = CrossingDetails(store.path.parent)
 
     async def map_around(self, lat: float, lon: float) -> OsmAround:
         result = await self.osm.around(lat, lon, self.settings.nearby_radius_m)
@@ -233,6 +235,7 @@ class GateAhead:
         body.update(mapped.freshness())
         body["coverage"] = _coverage(batch, mapped)
         body["service_updates"] = getattr(batch, "service_updates", [])
+        body["crossing_access"] = self.crossing_details.for_crossing(crossing)
         return body
 
     async def _positions(
@@ -376,8 +379,11 @@ class GateAhead:
             "deadline_exhausted": timed_out,
         }, updates)
 
-    async def predict_here(self, lat: float, lon: float) -> dict:
-        deadline = asyncio.get_running_loop().time() + _TRACKING_BUDGET
+    async def predict_here(
+        self, lat: float, lon: float, *, budget_seconds: float = _TRACKING_BUDGET,
+        alert_gate_ids: frozenset[str] = frozenset(),
+    ) -> dict:
+        deadline = asyncio.get_running_loop().time() + min(_TRACKING_BUDGET, budget_seconds)
         mapped = await self.map_around(lat, lon)
         if mapped.error:
             return {"error": mapped.error, "crossings": 0, "stations": [], "checked": 0, "running": 0, "approaching": [], "passed": [], "sightings": []}
@@ -432,13 +438,17 @@ class GateAhead:
                         continue
                     etas.append((call.eta, call.bracket, status, call.source))
                     gate_ids.append(crossing.id)
-                    if _cluster_is_shown(status, cluster.id in focus):
+                    if crossing.id in alert_gate_ids or _cluster_is_shown(status, cluster.id in focus):
                         gate_predictions.append({
                             "id": crossing.id, "train": position.train_number, "name": position.name,
                             "run_id": position.run_id, "start_date": position.start_date,
                             "eta": round(call.eta, 1), "closes_in": round(closes_in(call.eta, self.settings), 1),
                             "status": status, "basis": call.source, "age_min": round(position.age_minutes, 1),
                             "at_station": standing(position), "observed": position.observed,
+                            "timing_confident": call.slack <= 3 and position.report_age_known,
+                            "timing_as_of": position.as_of.timestamp(),
+                            "alert_closes_at": position.as_of.timestamp() + closes_in(call.eta, self.settings) * 60,
+                            "alert_fresh_until": position.as_of.timestamp() + (REPORT_FRESH_MIN - position.age_minutes) * 60,
                         })
                 if not etas:
                     continue
@@ -500,6 +510,8 @@ class GateAhead:
             "checked": getattr(batch, "coverage", {}).get("live_checked", len(numbers)),
             "running": len(positions),
             "gate_predictions": sorted(gate_predictions, key=lambda row: row["eta"]),
+            **({"unmapped_gate_count": len(alert_gate_ids - {crossing.id for crossing in crossings})}
+               if alert_gate_ids else {}),
             "approaching": approaching,
             "passed": just_passed,
             "awaiting_update": awaiting,

@@ -208,9 +208,7 @@ def test_current_moving_report_survives_schedule_exclusion(tmp_path, monkeypatch
 
 
 def test_simultaneous_locations_keep_their_own_coverage(tmp_path):
-    service = GateAhead.__new__(GateAhead)
-    service.settings = load_settings()
-    service.store = Store(tmp_path / "locations.db")
+    service = GateAhead(load_settings(), Store(tmp_path / "locations.db"), None)
     service.map_around = AsyncMock(return_value=OsmAround(
         [Crossing("g", "Gate", 12.15, 75.2, "osm")], [], [], False,
     ))

@@ -7,6 +7,14 @@ from typing import Literal
 CrossingStatus = Literal["pending", "public", "rejected", "restricted"]
 Direction = Literal["southbound", "northbound", "unknown"]
 PinVerdict = Literal["existing", "candidate", "reject"]
+Access = Literal["allowed", "restricted", "unknown"]
+
+
+@dataclass(frozen=True)
+class CrossingModes:
+    cars: Access = "unknown"
+    two_wheelers: Access = "unknown"
+    pedestrians: Access = "unknown"
 
 
 @dataclass(frozen=True)
@@ -24,6 +32,7 @@ class Crossing:
     group_id: str = ""
     group_name: str = ""
     group_size: int = 1
+    modes: CrossingModes | None = None
 
     @property
     def coords(self) -> tuple[float, float]:

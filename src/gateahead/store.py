@@ -64,6 +64,13 @@ class Store:
               legacy_key BLOB PRIMARY KEY,
               crossing_id TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS crossing_detail_flags (
+              crossing_id TEXT NOT NULL,
+              reporter TEXT NOT NULL,
+              created_at REAL NOT NULL,
+              PRIMARY KEY (crossing_id, reporter)
+            );
+            CREATE INDEX IF NOT EXISTS crossing_detail_flags_at ON crossing_detail_flags(created_at);
             CREATE TABLE IF NOT EXISTS alerts (
               key TEXT PRIMARY KEY,
               sent_at TEXT NOT NULL
@@ -720,6 +727,7 @@ class Store:
             self._conn.execute("DELETE FROM catalog_lock WHERE owner=?", (owner,))
 
     def prune_retained_data(self) -> None:
+        from gateahead.crossing_details import FLAG_RETENTION_SECONDS
         from gateahead.reports import Reports
 
         now = time.time()
@@ -728,6 +736,9 @@ class Store:
             if "gate_reports" in tables:
                 db.execute("DELETE FROM gate_reports WHERE rowid IN "
                            "(SELECT rowid FROM gate_reports WHERE created_at <= ? LIMIT 1000)", (now - Reports.ttl,))
+            db.execute("DELETE FROM crossing_detail_flags WHERE rowid IN "
+                       "(SELECT rowid FROM crossing_detail_flags WHERE created_at <= ? LIMIT 1000)",
+                       (now - FLAG_RETENTION_SECONDS,))
             if "provider_snapshots" in tables:
                 db.execute("DELETE FROM provider_snapshots WHERE rowid IN (SELECT rowid FROM provider_snapshots "
                            "WHERE expires <= ? AND lease_until <= ? LIMIT 1000)",

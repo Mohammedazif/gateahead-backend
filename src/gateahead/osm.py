@@ -101,7 +101,7 @@ def parse_overpass(payload: dict, origin: tuple[float, float]) -> tuple[list[Cro
         tags = el.get("tags") or {}
         if any(tags.get(key) is not None and not isinstance(tags[key], str)
                for key in ("railway", "highway", "ref", "name", "name:en", "access", "vehicle", "motor_vehicle",
-                           "operator", "landuse", "building", "usage", "service")):
+                           "motorcar", "motorcycle", "foot", "operator", "landuse", "building", "usage", "service")):
             raise ValueError("Map provider returned invalid tags")
         kind = el.get("type")
         railway = tags.get("railway", "")

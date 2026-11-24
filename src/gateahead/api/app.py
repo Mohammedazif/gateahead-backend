@@ -18,8 +18,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from gateahead.cities import search_cities
 from gateahead.clusters import gate_label
 from gateahead.config import load_settings
+from gateahead.crossing_details import record_crossing_flag
+from gateahead.geo import km
 from gateahead.halts import clean_code, ensure_catalog
+from gateahead.models import Crossing
+from gateahead.osm import OsmAround
+from gateahead.phone_alerts import (
+    PhoneAlertCapacity,
+    PhoneAlertChallenge,
+    PhoneAlertConfig,
+    PhoneAlertConflict,
+    PhoneAlertDevice,
+    PhoneAlertPoller,
+    PhoneAlertProofRequired,
+    PhoneAlertRegistration,
+    PhoneAlertStore,
+    SavedGateAlert,
+)
 from gateahead.place import lookup_place
+from gateahead.push_delivery import FCMPushDelivery
 from gateahead.service import GateAhead, crossing_distances
 from gateahead.reports import Reports
 from gateahead.store import Store
@@ -52,9 +69,14 @@ _WINDOW = 600.0
 _settings = load_settings()
 _store = Store(_settings.db_path)
 _reports = Reports(_settings.db_path)
+_phone_alerts = PhoneAlertStore(_settings.db_path)
 _session: aiohttp.ClientSession | None = None
 _service: GateAhead | None = None
 _maintenance: asyncio.Task | None = None
+_phone_poll: asyncio.Task | None = None
+_phone_config: PhoneAlertConfig | None = None
+_phone_delivery: FCMPushDelivery | None = None
+_phone_map_slots = asyncio.Semaphore(6)
 _log = logging.getLogger(__name__)
 
 
@@ -62,21 +84,37 @@ async def _maintain_storage() -> None:
     while True:
         try:
             _store.prune_retained_data()
+            await asyncio.to_thread(_phone_alerts.prune)
         except sqlite3.OperationalError:
             _log.exception("Deferred database cleanup until the next maintenance interval")
         await asyncio.sleep(60)
 
 
 async def startup() -> None:
-    global _session, _service, _maintenance
+    global _session, _service, _maintenance, _phone_poll, _phone_config, _phone_delivery
     _session = aiohttp.ClientSession()
     _service = GateAhead(_settings, _store, _session)
     await ensure_catalog(_session, _store)
     _maintenance = asyncio.create_task(_maintain_storage())
+    if os.getenv("GATEAHEAD_FCM_PROJECT_ID", "").strip():
+        try:
+            _phone_config = PhoneAlertConfig.from_environment()
+        except ValueError as exc:
+            _log.error("Saved crossing alerts disabled. %s", exc)
+            return
+        _phone_delivery = await FCMPushDelivery.from_environment(_session, _phone_alerts)
+        if _phone_delivery is not None:
+            _phone_poll = asyncio.create_task(
+                PhoneAlertPoller(_service, _phone_alerts, _phone_delivery, _phone_config).run()
+            )
 
 
 async def shutdown() -> None:
-    global _maintenance, _service, _session
+    global _maintenance, _service, _session, _phone_poll, _phone_config, _phone_delivery
+    if _phone_poll:
+        _phone_poll.cancel()
+        await asyncio.gather(_phone_poll, return_exceptions=True)
+        _phone_poll = None
     if _maintenance:
         _maintenance.cancel()
         await asyncio.gather(_maintenance, return_exceptions=True)
@@ -85,12 +123,14 @@ async def shutdown() -> None:
     if _session:
         await _session.close()
     _maintenance = _service = _session = None
+    _phone_config = _phone_delivery = None
 
 
 @app.get("/health")
 async def health() -> dict:
     return {"ok": True, "database_id": _store.meta("database_id"), "providers": _store.provider_status(),
-            "worker": _store.worker_status(), "worker_required": os.getenv("GATEAHEAD_WORKER_REQUIRED") == "1"}
+            "worker": _store.worker_status(), "worker_required": os.getenv("GATEAHEAD_WORKER_REQUIRED") == "1",
+            "phone_alerts": await phone_alerts_available()}
 
 
 @app.get("/ready")
@@ -108,6 +148,149 @@ async def ready(response: Response) -> dict:
 @app.get("/coverage")
 async def coverage() -> dict:
     return _store.catalog_status(_settings.route_max_age_hours)
+
+
+@app.get("/phone-alerts")
+async def phone_alerts_available() -> dict:
+    if not _phone_config or not _phone_delivery or not _phone_poll or _phone_poll.done():
+        return {"enabled": False, "status": "disabled"}
+    worker, provider = await asyncio.gather(
+        asyncio.to_thread(_phone_alerts.worker_health), asyncio.to_thread(_phone_alerts.provider_health)
+    )
+    now = time.time()
+    last_poll = worker["last_success"]
+    lag = max(0, round(now - last_poll)) if last_poll else None
+    overdue = (lag > 2 * _phone_config.interval if lag is not None
+               else worker["next_poll"] and now - worker["next_poll"] > _phone_config.interval)
+    if worker["failed_areas"] or provider["failures"] or overdue:
+        status = "degraded"
+    else:
+        status = "ready" if last_poll and provider["last_success"] else "starting"
+    return {
+        "enabled": True, "status": status, "last_poll_age_seconds": lag,
+        "failed_areas": worker["failed_areas"], "provider_failures": provider["failures"],
+        "retry_after_seconds": max(0, math.ceil(provider["retry_at"] - now)),
+    }
+
+
+@app.post("/phone-alerts/status")
+async def phone_alert_status(request: Request, body: PhoneAlertDevice) -> dict:
+    _limit(request, "phone-alert-status", 60)
+    requested, availability = await asyncio.gather(
+        asyncio.to_thread(_phone_alerts.status, body), phone_alerts_available()
+    )
+    return {**availability, **requested}
+
+
+def _phone_conflict(exc: PhoneAlertConflict) -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "message": "Phone alert settings changed. Refresh before saving.", "revision": exc.revision,
+    })
+
+
+@app.post("/phone-alerts/challenge")
+async def phone_alert_challenge(request: Request, body: PhoneAlertChallenge) -> dict:
+    _limit(request, "phone-alert-challenge", 8)
+    availability = await phone_alerts_available()
+    if not availability["enabled"] or _phone_delivery is None:
+        raise HTTPException(status_code=503, detail="Phone alerts are unavailable on this server.")
+    if availability["retry_after_seconds"]:
+        raise HTTPException(status_code=503, detail="Firebase delivery is temporarily unavailable.",
+                            headers={"Retry-After": str(availability["retry_after_seconds"])})
+    try:
+        challenge_id, proof, deadline = await asyncio.to_thread(_phone_alerts.issue_challenge, body)
+    except PhoneAlertConflict as exc:
+        raise _phone_conflict(exc) from exc
+    except PhoneAlertCapacity as exc:
+        raise HTTPException(status_code=429, detail="Wait before requesting another registration check.",
+                            headers={"Retry-After": "120"}) from exc
+    outcome = await _phone_delivery.challenge(body.fid, challenge_id, proof, deadline)
+    if outcome != "sent":
+        await asyncio.to_thread(_phone_alerts.close_challenge, challenge_id)
+        if outcome in ("unregistered", "rejected"):
+            raise HTTPException(status_code=422, detail="Firebase could not reach this installation.")
+        raise HTTPException(status_code=503, detail="Firebase delivery is temporarily unavailable.")
+    return {"challenge_id": challenge_id, "expires_in": max(1, int(deadline - time.time()))}
+
+
+@app.post("/phone-alerts")
+async def update_phone_alerts(request: Request, body: PhoneAlertRegistration) -> dict:
+    _limit(request, "phone-alerts" if body.gates else "phone-alert-revoke", 30)
+    config = _phone_config
+    if body.gates and (not config or not (await phone_alerts_available())["enabled"]):
+        raise HTTPException(status_code=503, detail="Phone alerts are unavailable on this server.")
+    try:
+        accepted, previous = await asyncio.to_thread(_phone_alerts.preflight, body)
+        if not accepted:
+            gates = await _verify_alert_crossings(body.gates, previous)
+            await asyncio.to_thread(_phone_alerts.replace, body, gates, config or PhoneAlertConfig())
+    except PhoneAlertConflict as exc:
+        raise _phone_conflict(exc) from exc
+    except PhoneAlertProofRequired as exc:
+        raise HTTPException(status_code=428, detail={
+            "code": "proof_required", "message": "Verify this phone before saving alerts.",
+        }) from exc
+    except PhoneAlertCapacity as exc:
+        raise HTTPException(status_code=409, detail={
+            "code": "capacity", "message": "This service has no capacity for the selected alert coverage.",
+        }) from exc
+    if not body.gates:
+        # The revocation is durable before waiting. Any older dispatch must
+        # drain before we return a confirmed turn-off, across API workers.
+        try:
+            async with asyncio.timeout(13):
+                while await asyncio.to_thread(_phone_alerts.has_dispatch, body.device_key):
+                    await asyncio.sleep(0.05)
+        except TimeoutError:
+            raise HTTPException(status_code=503, detail="Settings were saved. Confirm turn-off again shortly.") from None
+    return {**(await phone_alerts_available()), **(await asyncio.to_thread(_phone_alerts.status, body))}
+
+
+async def _verify_alert_crossings(
+    gates: list[SavedGateAlert], previous: list[SavedGateAlert],
+) -> list[SavedGateAlert]:
+    known = {gate.crossing_id: gate for gate in previous}
+    ids = set()
+    resolved = []
+    for gate in gates:
+        crossing_id = _store.canonical_crossing_id(gate.crossing_id)
+        if crossing_id.startswith("user:") or (
+                crossing_id.startswith("pin:") and not _store.is_public_pin(crossing_id)):
+            raise HTTPException(status_code=404, detail="A saved crossing could not be verified.")
+        if crossing_id in ids:
+            raise HTTPException(status_code=422, detail="Choose each crossing once.")
+        ids.add(crossing_id)
+        resolved.append(gate.model_copy(update={"crossing_id": crossing_id}))
+
+    async def verify(gate):
+        old = known.get(gate.crossing_id)
+        point = (gate.lat, gate.lon)
+        if old and km((old.lat, old.lon), point) <= 0.3:
+            return gate.model_copy(update={"lat": old.lat, "lon": old.lon, "name": old.name})
+        assert _service is not None
+        async with _phone_map_slots:
+            mapped = await _service.map_around(*point)
+        if mapped.error or mapped.map_warning:
+            raise HTTPException(status_code=503, detail="Current crossing map data is unavailable.")
+        crossing = next((crossing for crossing in mapped.crossings
+                         if crossing.id == gate.crossing_id and crossing.status == "public"), None)
+        if crossing is None or km(crossing.coords, point) > 0.3:
+            raise HTTPException(status_code=404, detail="A saved crossing could not be verified.")
+        return gate.model_copy(update={"lat": crossing.lat, "lon": crossing.lon, "name": gate_label(crossing)[:640]})
+
+    if not resolved:
+        return []
+    tasks = [asyncio.create_task(verify(gate)) for gate in resolved]
+    try:
+        async with asyncio.timeout(76):
+            return list(await asyncio.gather(*tasks))
+    except TimeoutError:
+        raise HTTPException(status_code=503, detail="Current crossing map data is unavailable.") from None
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 @app.get("/cities")
@@ -281,12 +464,15 @@ async def scene(
     return await _service.scene_here(lat, lon, crossing_id)
 
 
-class GateReport(BaseModel):
+class CrossingSubmission(BaseModel):
     crossing_id: str = Field(min_length=1, max_length=120)
     installation_id: str = Field(min_length=16, max_length=80, pattern=r"^[A-Za-z0-9-]+$")
-    state: Literal["open", "closed", "wrong_location"]
     lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
     lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
+
+
+class GateReport(CrossingSubmission):
+    state: Literal["open", "closed", "wrong_location"]
 
 
 @app.get("/reports")
@@ -308,3 +494,63 @@ async def report(request: Request, body: GateReport) -> dict:
     if not any(gate.id == canonical_id for gate in mapped.crossings):
         raise HTTPException(status_code=404, detail="Crossing not found at this location.")
     return _reports.submit(canonical_id, body.installation_id, body.state)
+
+
+async def _details_crossing(
+    lat: float, lon: float, crossing_id: str, *, require_fresh: bool,
+) -> tuple[Crossing, OsmAround]:
+    assert _service is not None
+    try:
+        async with asyncio.timeout(28):
+            mapped = await _service.map_around(lat, lon)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=503, detail="Crossing map is busy. Try again shortly.") from exc
+    if mapped.error or (require_fresh and mapped.map_warning):
+        raise HTTPException(status_code=503, detail="Crossing could not be verified. Try again later.")
+    canonical_id = _store.canonical_crossing_id(crossing_id)
+    gate = next((gate for gate in mapped.crossings if gate.id == canonical_id), None)
+    if gate is None or km(gate.coords, (lat, lon)) > 0.3:
+        if mapped.map_warning:
+            raise HTTPException(status_code=503, detail="Crossing could not be verified. Try again later.")
+        raise HTTPException(status_code=404, detail="Crossing not found at this location.")
+    return gate, mapped
+
+
+@app.get("/crossing-details")
+async def crossing_details(
+    request: Request,
+    lat: float = Query(..., ge=-90, le=90, allow_inf_nan=False),
+    lon: float = Query(..., ge=-180, le=180, allow_inf_nan=False),
+    crossing_id: str = Query(..., min_length=1, max_length=120),
+) -> dict:
+    _limit(request, "crossing-details", 60)
+    try:
+        gate, mapped = await _details_crossing(lat, lon, crossing_id, require_fresh=False)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "crossing_not_found", "message": exc.detail},
+        ) from exc
+    assert _service is not None
+    return {
+        "crossing": {"id": gate.id, "name": gate_label(gate), "lat": gate.lat, "lon": gate.lon},
+        "crossing_access": _service.crossing_details.for_crossing(gate),
+        **({"legacy_alias_resolved": True} if gate.id != crossing_id else {}),
+        **mapped.freshness(),
+    }
+
+
+@app.post("/crossing-details/flags", status_code=202)
+async def flag_crossing_details(request: Request, body: CrossingSubmission) -> dict:
+    _limit(request, "crossing-detail-flags", 10)
+    gate, _ = await _details_crossing(body.lat, body.lon, body.crossing_id, require_fresh=True)
+    try:
+        await asyncio.to_thread(record_crossing_flag, _store.path, gate.id, body.installation_id)
+    except sqlite3.OperationalError as exc:
+        error_code = getattr(exc, "sqlite_errorcode", 0) & 0xFF
+        if error_code not in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+            raise
+        raise HTTPException(status_code=503, detail="Reports are busy. Try again shortly.") from exc
+    return {"accepted": True}

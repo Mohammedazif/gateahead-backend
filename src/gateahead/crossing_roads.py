@@ -11,13 +11,19 @@ from collections import defaultdict
 from dataclasses import replace
 
 from gateahead.geo import km
-from gateahead.models import Crossing
+from gateahead.models import Access, Crossing, CrossingModes
 
 _GROUP_KM = 0.08
 _RESTRICTED = {"no", "private", "customers", "delivery", "agricultural", "forestry", "permit"}
 _FOOTWAYS = {"footway", "path", "cycleway", "bridleway", "steps", "pedestrian", "platform"}
 _NON_ROADS = {"construction", "proposed", "abandoned", "razed", "raceway", "corridor"}
 _MOTOR_ACCESS = {"yes", "designated", "permissive", "destination"}
+_MODE_TAGS = (
+    ("motorcar", "motor_vehicle", "vehicle", "access"),
+    ("motorcycle", "motor_vehicle", "vehicle", "access"),
+    ("foot", "access"),
+)
+_SHARED_ROADS = {"tertiary", "secondary", "primary", "unclassified", "residential", "living_street"}
 FREIGHT_OPERATOR = r"Food[ .-]+Cor(poration|pn)[. ]+of[ .-]+India|^F[. ]*C[. ]*I[.]?$"
 FREIGHT_NAME = (r"(^|[^A-Za-z0-9])F[. ]*C[. ]*I([. ]|[^A-Za-z0-9]|$)|"
                 r"Food[ .-]+Cor(poration|pn)[. ]+of[ .-]+India|"
@@ -39,6 +45,48 @@ def _public_road(tags: dict) -> bool:
     if highway in _FOOTWAYS:
         return (tags.get("motor_vehicle") or "").lower() in _MOTOR_ACCESS
     return True
+
+
+def _mode_access(tags: dict, keys: tuple[str, ...]) -> Access | None:
+    if any(tags.get(f"{key}:conditional") for key in keys):
+        return "unknown"
+    for key in keys:
+        value = (tags.get(key) or "").strip().lower()
+        if value:
+            if value in _RESTRICTED or value == "destination":
+                return "restricted"
+            if value in _MOTOR_ACCESS:
+                return "allowed"
+            return "unknown"
+    return None
+
+
+def _road_mode_access(road: dict, keys: tuple[str, ...]) -> Access:
+    access = _mode_access(road, keys)
+    if access is not None:
+        return access
+    if keys[0] == "foot":
+        return "allowed" if road["highway"] in {"footway", "pedestrian", "living_street", "steps"} else "unknown"
+    if road["highway"] in _SHARED_ROADS:
+        return "allowed"
+    return "unknown"
+
+
+def _crossing_modes(tags: dict, roads: list[dict]) -> CrossingModes | None:
+    values: list[Access] = []
+    for keys in _MODE_TAGS:
+        node_access = _mode_access(tags, keys)
+        approaches = {_road_mode_access(road, keys)
+                      for road in roads if road["highway"] not in _NON_ROADS}
+        # Permission at the rail node cannot grant access on its approaches.
+        if node_access == "restricted" or approaches == {"restricted"}:
+            values.append("restricted")
+        elif node_access != "unknown" and approaches == {"allowed"}:
+            values.append("allowed")
+        else:
+            values.append("unknown")
+    modes = CrossingModes(*values)
+    return modes if modes != CrossingModes() else None
 
 
 def _name(tags: dict) -> str:
@@ -153,7 +201,7 @@ def road_crossings(candidates: list[Crossing], elements: list[dict]) -> list[Cro
             continue
         names = sorted({_name(r) or r.get("ref") or "" for r in public} - {""})
         road = names[0] if names else ""
-        retained[key] = replace(crossing, road=road,
+        retained[key] = replace(crossing, road=road, modes=_crossing_modes(tags, roads),
                                 name=road if road and crossing.name == "Level crossing" else crossing.name)
 
     # Search along public road edges, stopping at junctions. A short distance

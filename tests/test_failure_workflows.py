@@ -280,11 +280,7 @@ def test_unreadable_pair_page_is_retryable_but_delimited_empty_pair_is_valid(mon
 def test_indexed_route_remains_visible_when_provider_discovery_is_down(tmp_path, monkeypatch):
     from gateahead.erail import TrainRows
 
-    service = GateAhead.__new__(GateAhead)
-    service.settings = load_settings()
-    service.store = Store(tmp_path / "discovery.db")
-    service.session = None
-    service.snapshots = None
+    service = GateAhead(load_settings(), Store(tmp_path / "discovery.db"), None)
     service.store.save_route("16512", _stops())
     stations = [Station("AAA", "South", 12, 75.2), Station("BBB", "North", 12.3, 75.2)]
     service.map_around = AsyncMock(return_value=OsmAround(

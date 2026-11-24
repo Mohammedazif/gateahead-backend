@@ -1,0 +1,74 @@
+{
+  "osm:node:5071022457": {
+    "lat": 12.3292219,
+    "lon": 75.0807151,
+    "bypasses": [{
+      "kind": "flyover",
+      "name": "Kottachery Rail Overbridge",
+      "lat": 12.3239581,
+      "lon": 75.0830607,
+      "verified_on": "2026-11-24",
+      "evidence": "https://www.openstreetmap.org/way/1043083622"
+    }]
+  },
+  "osm:node:5071022461": {
+    "lat": 12.3292397,
+    "lon": 75.0807577,
+    "bypasses": [{
+      "kind": "flyover",
+      "name": "Kottachery Rail Overbridge",
+      "lat": 12.3239581,
+      "lon": 75.0830607,
+      "verified_on": "2026-11-24",
+      "evidence": "https://www.openstreetmap.org/way/1043083622"
+    }]
+  },
+  "osm:node:7488474845": {
+    "lat": 12.3098973,
+    "lon": 75.0893215,
+    "bypasses": [{
+      "kind": "flyover",
+      "name": "Kottachery Rail Overbridge",
+      "lat": 12.3239581,
+      "lon": 75.0830607,
+      "verified_on": "2026-11-24",
+      "evidence": "https://www.openstreetmap.org/way/1043083622"
+    }]
+  },
+  "osm:node:7488474846": {
+    "lat": 12.3098768,
+    "lon": 75.0892648,
+    "bypasses": [{
+      "kind": "flyover",
+      "name": "Kottachery Rail Overbridge",
+      "lat": 12.3239581,
+      "lon": 75.0830607,
+      "verified_on": "2026-11-24",
+      "evidence": "https://www.openstreetmap.org/way/1043083622"
+    }]
+  },
+  "osm:node:8240832710": {
+    "lat": 12.2224683,
+    "lon": 75.1517752,
+    "bypasses": [{
+      "kind": "flyover",
+      "name": "Cheruvathur–Padanna Rail Overbridge",
+      "lat": 12.2111937,
+      "lon": 75.1559065,
+      "verified_on": "2026-11-24",
+      "evidence": "https://www.openstreetmap.org/way/924999685"
+    }]
+  },
+  "osm:node:8240832711": {
+    "lat": 12.2224937,
+    "lon": 75.1518702,
+    "bypasses": [{
+      "kind": "flyover",
+      "name": "Cheruvathur–Padanna Rail Overbridge",
+      "lat": 12.2111937,
+      "lon": 75.1559065,
+      "verified_on": "2026-11-24",
+      "evidence": "https://www.openstreetmap.org/way/924999685"
+    }]
+  }
+}
