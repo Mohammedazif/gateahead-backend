@@ -163,7 +163,10 @@ def test_map_query_fetches_connected_roads_across_full_crossing_radius():
     assert 'node["railway"="level_crossing"](around:10000,12,75)' in query
     assert 'way(bn.crossings)["highway"]' in query
     assert 'way(bn.crossings)["railway"]' in query
+    assert 'way["highway"](around.crossings:80)' in query
     assert '["name:en"~' in query and '["operator"~' in query and 'godowns?' in query
+    assert '["railway"~"^(station|halt)$"]["ref"]' in query
+    assert "out center;" in query and "out tags 1;" in query
 
 
 def test_map_client_carries_exact_rejected_ids_to_saved_crossing_merge(monkeypatch):

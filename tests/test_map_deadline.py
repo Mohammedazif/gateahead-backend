@@ -1,4 +1,4 @@
-"""Cold map failover must finish before the browser abandons the request."""
+"""Map lookups share provider work and stay under crossing detail timeouts."""
 
 import asyncio
 from types import SimpleNamespace
@@ -56,22 +56,21 @@ def test_all_cold_mirrors_share_one_deadline_below_browser_timeout(clock):
     session = FakeSession(clock, ["timeout", "timeout", "timeout"])
     result = asyncio.run(osm.OsmClient(session).around(*KEY))
     assert result.error == "map_busy"
-    assert session.timeouts == [30, 30, 15]
-    assert clock[0] - 1000 == 75
-    assert clock[0] - 1000 < 90
+    assert session.timeouts == [9, 9, 8]
+    assert clock[0] - 1000 == 26
     assert KEY not in osm._cache
 
 
 def test_last_mirror_can_recover_inside_remaining_budget_and_warm_lookup_needs_no_network(clock):
-    session = FakeSession(clock, ["timeout", "timeout", 14])
+    session = FakeSession(clock, ["timeout", "timeout", 7])
     client = osm.OsmClient(session)
     result = asyncio.run(client.around(*KEY))
     assert result.error is None
     assert [gate.id for gate in result.crossings] == ["osm:node:4"]
-    assert clock[0] - 1000 == 74
-    assert session.timeouts == [30, 30, 15]
+    assert clock[0] - 1000 == 25
+    assert session.timeouts == [9, 9, 8]
     assert asyncio.run(client.around(*KEY)) == result
-    assert session.timeouts == [30, 30, 15]
+    assert session.timeouts == [9, 9, 8]
 
 
 def test_deadline_preserves_stale_map_without_making_it_fresh(clock):
@@ -84,7 +83,7 @@ def test_deadline_preserves_stale_map_without_making_it_fresh(clock):
     assert degraded.crossings == previous.crossings
     assert degraded.map_warning == "map_busy"
     assert degraded.map_age_seconds == int(clock[0] - stale_at)
-    assert clock[0] - 1000 == 75
+    assert clock[0] - 1000 == 26
     assert osm._cache[KEY][0] == stale_at
 
 
@@ -119,6 +118,50 @@ def test_overall_deadline_is_enforced_even_if_transport_ignores_its_timeout(monk
         assert result.error == "map_busy"
         assert len(calls) == 1
         assert 0 < calls[0] <= 0.02
+
+    asyncio.run(run())
+
+
+def test_concurrent_gate_and_prediction_waiters_share_one_map_request(monkeypatch):
+    monkeypatch.setattr(osm, "_cache", {})
+
+    async def run():
+        started = asyncio.Event()
+        release = asyncio.Event()
+        urls = []
+
+        class Response:
+            status = 200
+
+            async def __aenter__(self):
+                started.set()
+                await release.wait()
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            async def json(self, **_):
+                return BODY
+
+        class Session:
+            def post(self, url, **_):
+                urls.append(url)
+                return Response()
+
+        client = osm.OsmClient(Session())
+        nearby = asyncio.create_task(client.around(*KEY))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        predictions = asyncio.create_task(client.around(*KEY))
+        await asyncio.sleep(0)
+        nearby.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await nearby
+        release.set()
+        mapped = await asyncio.wait_for(predictions, timeout=1)
+        assert [gate.id for gate in mapped.crossings] == ["osm:node:4"]
+        assert urls == [osm.ASIA_OVERPASS_URL]
+        assert (await client.around(*KEY)).cached
 
     asyncio.run(run())
 

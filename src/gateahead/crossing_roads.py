@@ -13,7 +13,7 @@ from dataclasses import replace
 from gateahead.geo import km
 from gateahead.models import Access, Crossing, CrossingModes
 
-_GROUP_KM = 0.08
+GROUP_DISTANCE_KM = 0.08
 _RESTRICTED = {"no", "private", "customers", "delivery", "agricultural", "forestry", "permit"}
 _FOOTWAYS = {"footway", "path", "cycleway", "bridleway", "steps", "pedestrian", "platform"}
 _NON_ROADS = {"construction", "proposed", "abandoned", "razed", "raceway", "corridor"}
@@ -212,7 +212,7 @@ def road_crossings(candidates: list[Crossing], elements: list[dict]) -> list[Cro
         visited: dict[str, float] = {}
         while queue:
             distance, node = heapq.heappop(queue)
-            if distance > _GROUP_KM or node in visited:
+            if distance > GROUP_DISTANCE_KM or node in visited:
                 continue
             visited[node] = distance
             if node != start and node in retained:
@@ -223,7 +223,7 @@ def road_crossings(candidates: list[Crossing], elements: list[dict]) -> list[Cro
             if node != start and len(graph.get(node, {})) > 2:
                 continue
             for other, length in graph.get(node, {}).items():
-                if other not in visited and distance + length <= _GROUP_KM:
+                if other not in visited and distance + length <= GROUP_DISTANCE_KM:
                     heapq.heappush(queue, (distance + length, other))
 
     groups = {key: {key} for key in retained}

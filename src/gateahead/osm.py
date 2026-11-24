@@ -1,32 +1,34 @@
 from __future__ import annotations
 
 import asyncio
-import time
 import math
+import time
 from dataclasses import dataclass, field, replace
 
 import aiohttp
 
+from gateahead.crossing_roads import FREIGHT_NAME, FREIGHT_OPERATOR, GROUP_DISTANCE_KM, road_crossings
 from gateahead.geo import km
 from gateahead.models import Crossing, Station
-from gateahead.crossing_roads import FREIGHT_NAME, FREIGHT_OPERATOR, road_crossings
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+ASIA_OVERPASS_URL = "https://ovp.dresel.systems/api-as/interpreter"
 OVERPASS_URLS = (
-    "https://overpass.openstreetmap.fr/api/interpreter",
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    OVERPASS_URL,
 )
 OVERPASS_HEADERS = {
-    "User-Agent": "GateAhead/0.3 (https://github.com/Mohammedazif/gateahead-tele)",
+    "User-Agent": "GateAhead/0.3 (https://github.com/Mohammedazif/gateahead-backend)",
     "Accept": "application/json",
 }
 _CACHE_TTL = 900.0
 _MAX_STALE_AGE = 24 * 60 * 60
 _CACHE_CAPACITY = 256
-_LOOKUP_BUDGET = 75.0
-_ATTEMPT_TIMEOUT = 30.0
-_cache: dict[tuple[float, float, int], tuple[float, "OsmAround"]] = {}
+_LOOKUP_BUDGET = 26.0
+_ATTEMPT_TIMEOUT = 9.0
+_STATION_RADIUS_M = 60_000
+_MapKey = tuple[float, float, int]
+_cache: dict[_MapKey, tuple[float, "OsmAround"]] = {}
 
 
 @dataclass
@@ -51,12 +53,24 @@ class OsmAround:
         return data
 
 
+@dataclass
+class _MapLookup:
+    task: asyncio.Task[OsmAround]
+    waiters: int = 0
+
+
 def _around_query(lat: float, lon: float, radius_m: float) -> str:
     r = int(radius_m)
-    road = max(120, int(radius_m / 5))
+    area = _bbox(lat, lon, r)
+    stations = _bbox(lat, lon, _STATION_RADIUS_M)
+    roads = _bbox(lat, lon, max(120, r // 5))
+    group_distance = int(GROUP_DISTANCE_KM * 1000)
     facility = '[~"^(landuse|railway|building)$"~"^(industrial|railway|yard|warehouse)$"]'
+    # Fetch geometry only for rails and roads relevant to crossings. The
+    # station lookup needs coordinates, and pin verification needs only a
+    # nearby highway's existence.
     return f"""
-    [out:json][timeout:25];
+    [out:json][timeout:8][maxsize:67108864];
     (
       node["railway"="level_crossing"](around:{r},{lat},{lon});
       node["railway"="crossing"](around:{r},{lat},{lon});
@@ -65,18 +79,34 @@ def _around_query(lat: float, lon: float, radius_m: float) -> str:
       .crossings;
       way(bn.crossings)["highway"];
       way(bn.crossings)["railway"];
-      way{facility}["name"~"{FREIGHT_NAME}",i](around:{r},{lat},{lon});
-      way{facility}["name:en"~"{FREIGHT_NAME}",i](around:{r},{lat},{lon});
-      way{facility}["operator"~"{FREIGHT_OPERATOR}",i](around:{r},{lat},{lon});
-      node["railway"="halt"](around:60000,{lat},{lon});
-      node["railway"="station"](around:60000,{lat},{lon});
-      way["railway"="station"](around:60000,{lat},{lon});
-      way["railway"="halt"](around:60000,{lat},{lon});
-      way["railway"="rail"](around:{r},{lat},{lon});
-      way["highway"](around:{road},{lat},{lon});
+      way["highway"](around.crossings:{group_distance});
+      way{facility}["name"~"{FREIGHT_NAME}",i]({area});
+      way{facility}["name:en"~"{FREIGHT_NAME}",i]({area});
+      way{facility}["operator"~"{FREIGHT_OPERATOR}",i]({area});
+      way["railway"="rail"]({area});
     );
     out body geom;
+    (
+      node["railway"~"^(station|halt)$"]["ref"]({stations});
+      way["railway"~"^(station|halt)$"]["ref"]({stations});
+    );
+    out center;
+    way["highway"]({roads});
+    out tags 1;
     """
+
+
+def _bbox(lat: float, lon: float, radius_m: float) -> str:
+    lat_delta = radius_m / 110_000.0
+    south, north = max(-90.0, lat - lat_delta), min(90.0, lat + lat_delta)
+    cosine = math.cos(math.radians(max(abs(south), abs(north))))
+    lon_delta = lat_delta / max(1e-9, cosine)
+    if lon_delta >= 180:
+        west, east = -180.0, 180.0
+    else:
+        west = (lon - lon_delta + 180) % 360 - 180
+        east = (lon + lon_delta + 180) % 360 - 180
+    return f"{south:.6f},{west:.6f},{north:.6f},{east:.6f}"
 
 
 def parse_overpass(payload: dict, origin: tuple[float, float]) -> tuple[list[Crossing], list[Station], list[list[tuple[float, float]]], bool]:
@@ -187,30 +217,48 @@ def _geom_points(geom: object) -> list[tuple[float, float]]:
 
 
 class OsmClient:
-    def __init__(self, session: aiohttp.ClientSession, url: str = OVERPASS_URL):
+    def __init__(self, session: aiohttp.ClientSession, url: str | None = None):
         self.session = session
         self.url = url
+        self._inflight: dict[_MapKey, _MapLookup] = {}
+        self._slots = asyncio.Semaphore(4)
 
     async def around(self, lat: float, lon: float, radius_m: float) -> OsmAround:
         key = (round(lat, 3), round(lon, 3), int(radius_m))
         cached = _cache.get(key)
-        now = time.monotonic()
-        if cached and now - cached[0] < _CACHE_TTL:
+        if cached and time.monotonic() - cached[0] < _CACHE_TTL:
             return replace(cached[1], cached=True)
-        query = _around_query(lat, lon, radius_m)
-        deadline = now + _LOOKUP_BUDGET
+        lookup = self._inflight.get(key)
+        if not lookup:
+            lookup = _MapLookup(asyncio.create_task(self._fetch(lat, lon, key, cached)))
+            self._inflight[key] = lookup
+        lookup.waiters += 1
+        try:
+            return await asyncio.shield(lookup.task)
+        finally:
+            lookup.waiters -= 1
+            if lookup.waiters == 0:
+                self._inflight.pop(key, None)
+                if not lookup.task.done():
+                    lookup.task.cancel()
+                    await asyncio.gather(lookup.task, return_exceptions=True)
+
+    async def _fetch(
+        self, lat: float, lon: float, key: _MapKey, cached: tuple[float, OsmAround] | None,
+    ) -> OsmAround:
+        query = _around_query(lat, lon, key[2])
+        deadline = time.monotonic() + _LOOKUP_BUDGET
         last_error = "map_busy"
-        for url in OVERPASS_URLS:
+        urls = (ASIA_OVERPASS_URL, *OVERPASS_URLS) if 0 <= lat <= 45 and 55 <= lon <= 105 else OVERPASS_URLS
+        for url in (self.url,) if self.url else urls:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             attempt = min(_ATTEMPT_TIMEOUT, remaining)
             timeout = aiohttp.ClientTimeout(total=attempt, sock_read=attempt)
             try:
-                # All mirrors share one deadline below the browser's 90-second
-                # request window. The outer timeout also bounds aiohttp's
-                # rounding of per-attempt deadlines.
-                async with asyncio.timeout(remaining):
+                # Include queue time and transport in each mirror's deadline.
+                async with asyncio.timeout(attempt), self._slots:
                     async with self.session.post(
                         url,
                         data={"data": query},
@@ -237,6 +285,7 @@ class OsmClient:
                           and (coords := _element_coords(el)) is not None}
             excluded = candidates.keys() - {c.id for c in crossings}
             excluded_points = {candidates[key] for key in excluded} - {c.coords for c in crossings}
+            stations = [station for station in stations if km((lat, lon), station.coords) * 1000 <= _STATION_RADIUS_M]
             result = OsmAround(crossings, stations, rails, has_highway,
                                excluded_crossing_ids=excluded, excluded_crossing_points=excluded_points)
             _cache.pop(key, None)
